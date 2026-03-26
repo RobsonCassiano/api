@@ -2,7 +2,7 @@
   console.log('%cFedEx Interceptor iniciando...', 'color: #ff6600; font-weight: bold;');
 
   const originalFetch = window.fetch;
-  const BACKEND_BASE_URL = 'http://localhost:3000';
+  const BACKEND_BASE_URL = 'https://fedex-shipping-api.onrender.com';
   const DEFAULT_PRINT_PREFERENCE = {
     labelFormat: 'laser',
     autoOpenDocuments: true,

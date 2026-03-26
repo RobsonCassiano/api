@@ -15,8 +15,7 @@
     "https://*.apps.az.fxei.fedex.com/*",
     "https://*.myshopify.com/*",
     "https://apis.fedex.com/*",
-    "https://localhost:3000/*",
-    "http://localhost:3000/*"
+    "https://fedex-shipping-api.onrender.com/*"
   ],
   "background": {
     "service_worker": "background.js"

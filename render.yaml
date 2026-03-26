@@ -13,6 +13,8 @@ services:
         value: 20
       - key: DRAFTS_DIR
         value: /var/data/drafts
+      - key: PREFERENCES_DIR
+        value: /var/data/preferences
       - key: PORT
         sync: false
       - key: ALLOWED_ORIGIN
