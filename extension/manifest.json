@@ -23,9 +23,8 @@
   "content_scripts": [
     {
       "matches": [
-        "https://www.fedex.com/shippingplus/pt-br/shipments-overview/*",
-        "https://www.fedex.com/shippingplus/shipments-overview/*",
-        "https://*.apps.az.fxei.fedex.com/shipments*",
+        "https://www.fedex.com/shippingplus/*",
+        "https://*.apps.az.fxei.fedex.com/*",
         "https://magicplus-magicplus.apps.az.fxei.fedex.com/*"
       ],
       "js": [
@@ -44,8 +43,7 @@
       ],
       "matches": [
         "https://www.fedex.com/*",
-        "https://*.apps.az.fxei.fedex.com/*",
-        "https://magicplus-magicplus.apps.az.fxei.fedex.com/*"
+        "https://*.apps.az.fxei.fedex.com/*"
       ]
     }
   ]
