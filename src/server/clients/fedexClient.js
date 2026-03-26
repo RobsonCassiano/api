@@ -102,12 +102,15 @@ async function getAuthToken(credentials = {}) {
     }
 }
 
-async function post(pathname, payload, credentials = {}) {
+async function request(method, pathname, payload, credentials = {}) {
     const resolvedCredentials = resolveCredentials(credentials);
     const token = await getAuthToken(resolvedCredentials);
 
     try {
-        return await axios.post(`${resolvedCredentials.baseURL}${pathname}`, payload, {
+        return await axios({
+            method,
+            url: `${resolvedCredentials.baseURL}${pathname}`,
+            data: payload,
             timeout: 10000,
             headers: {
                 'Content-Type': 'application/json',
@@ -123,7 +126,10 @@ async function post(pathname, payload, credentials = {}) {
         clearTokenCache(resolvedCredentials);
         const retryToken = await getAuthToken(resolvedCredentials);
 
-        return axios.post(`${resolvedCredentials.baseURL}${pathname}`, payload, {
+        return axios({
+            method,
+            url: `${resolvedCredentials.baseURL}${pathname}`,
+            data: payload,
             timeout: 10000,
             headers: {
                 'Content-Type': 'application/json',
@@ -157,7 +163,12 @@ function getTokenCacheStatus() {
 }
 
 module.exports = {
-    post,
+    post(pathname, payload, credentials = {}) {
+        return request('post', pathname, payload, credentials);
+    },
+    put(pathname, payload, credentials = {}) {
+        return request('put', pathname, payload, credentials);
+    },
     getAuthToken,
     clearTokenCache,
     getTokenCacheStatus

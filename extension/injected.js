@@ -20,7 +20,9 @@
     currentUserId: null,
     printPreference: { ...DEFAULT_PRINT_PREFERENCE },
     fedexSettings: { ...DEFAULT_FEDEX_SETTINGS },
-    fedexSettingsMode: 'summary'
+    fedexSettingsMode: 'summary',
+    cancelableShipments: [],
+    selectedCancellationTracking: ''
   };
 
   function clamp(value, min, max) {
@@ -635,6 +637,8 @@
       inlineMessage.textContent = '';
       inlineMessage.style.display = 'none';
     }
+
+    populateCancellationOptions();
   }
 
   function showInlineMessage(message, tone = 'success') {
@@ -662,6 +666,136 @@
     inlineMessage.style.display = 'none';
   }
 
+  function extractTrackingNumberFromDraftRecord(draft) {
+    return (
+      draft?.shipmentResponse?.trackingNumber ||
+      draft?.shipmentResponse?.shipmentInfo?.masterTrackingNumber ||
+      draft?.shipmentResponse?.fullResponse?.output?.transactionShipments?.[0]?.masterTrackingNumber ||
+      draft?.trackingNumber ||
+      null
+    );
+  }
+
+  function getDraftRecordUserId(draft) {
+    return draft?.fedexUserId || getDraftUserId(draft?.data) || null;
+  }
+
+  function populateCancellationOptions() {
+    const select = document.getElementById('fedexCancelTrackingSelect');
+    const button = document.getElementById('fedexCancelShipmentButton');
+    const hint = document.getElementById('fedexCancelHint');
+    const selectedAccount = getSelectedFedexAccount();
+
+    if (!select || !button || !hint) {
+      return;
+    }
+
+    select.innerHTML = '';
+
+    if (!uiState.cancelableShipments.length) {
+      const option = document.createElement('option');
+      option.value = '';
+      option.textContent = 'Nenhum tracking disponivel';
+      select.appendChild(option);
+      select.disabled = true;
+      button.disabled = true;
+      hint.textContent = 'Os trackings enviados com sucesso aparecerao aqui.';
+      return;
+    }
+
+    uiState.cancelableShipments.forEach((shipment) => {
+      const option = document.createElement('option');
+      option.value = shipment.trackingNumber;
+      option.textContent = shipment.label;
+      option.selected = shipment.trackingNumber === uiState.selectedCancellationTracking;
+      select.appendChild(option);
+    });
+
+    select.disabled = false;
+    button.disabled = !selectedAccount || !uiState.selectedCancellationTracking;
+    hint.textContent = selectedAccount
+      ? `Conta ativa para cancelamento: ${selectedAccount.accountNumber}`
+      : 'Selecione uma conta FedEx antes de cancelar.';
+  }
+
+  async function refreshCancelableShipments() {
+    try {
+      const response = await originalFetch(`${BACKEND_BASE_URL}/api/v1/drafts`);
+      const data = await response.json().catch(() => null);
+
+      if (!response.ok) {
+        throw new Error(data?.error || `Falha ao carregar drafts processados (HTTP ${response.status})`);
+      }
+
+      const drafts = Array.isArray(data?.drafts) ? data.drafts : [];
+      const currentUserId = getCurrentUserId();
+      const shipments = drafts
+        .filter((draft) => {
+          const trackingNumber = extractTrackingNumberFromDraftRecord(draft);
+          const draftUserId = getDraftRecordUserId(draft);
+          return Boolean(trackingNumber)
+            && draft?.status !== 'CANCELLED'
+            && (!currentUserId || draftUserId === currentUserId);
+        })
+        .sort((a, b) => {
+          const left = new Date(b?.processedAt || b?.createdAt || 0).getTime();
+          const right = new Date(a?.processedAt || a?.createdAt || 0).getTime();
+          return left - right;
+        })
+        .map((draft) => {
+          const trackingNumber = extractTrackingNumberFromDraftRecord(draft);
+          const draftLabel = draft?.data?.draftNumber || draft?.data?.outboundShipmentInformation?.references?.customerReference || draft?.id;
+          return {
+            trackingNumber,
+            draftId: draft?.id || null,
+            label: `${trackingNumber} (${draftLabel || 'draft'})`
+          };
+        });
+
+      uiState.cancelableShipments = shipments;
+
+      if (!shipments.some((item) => item.trackingNumber === uiState.selectedCancellationTracking)) {
+        uiState.selectedCancellationTracking = shipments[0]?.trackingNumber || '';
+      }
+
+      populateCancellationOptions();
+    } catch (error) {
+      console.error('Erro ao carregar trackings cancelaveis:', error);
+      uiState.cancelableShipments = [];
+      uiState.selectedCancellationTracking = '';
+      populateCancellationOptions();
+    }
+  }
+
+  async function cancelShipment(trackingNumber, accountNumber) {
+    const userId = getCurrentUserId();
+
+    if (!userId) {
+      throw new Error('Usuario FedEx nao identificado na tela atual');
+    }
+
+    if (!trackingNumber) {
+      throw new Error('Selecione um tracking para cancelar');
+    }
+
+    const response = await originalFetch(`${BACKEND_BASE_URL}/api/v1/fedex/shipments/cancel`, {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        userId,
+        accountNumber,
+        trackingNumber
+      })
+    });
+    const data = await response.json().catch(() => null);
+
+    if (!response.ok) {
+      throw new Error(data?.error || `Falha ao cancelar shipment (HTTP ${response.status})`);
+    }
+
+    return data;
+  }
+
   async function syncPrintPreferenceFromDrafts() {
     const nextUserId = getDraftUserId(window.__READY_TO_FINALIZE__?.[0]);
 
@@ -680,6 +814,7 @@
     }
 
     populateFedexSettingsForm();
+    await refreshCancelableShipments();
   }
 
   async function saveDraftToBackend(draft) {
@@ -1202,6 +1337,81 @@
     };
     body.appendChild(saveButton);
 
+    const cancelSectionTitle = document.createElement('div');
+    cancelSectionTitle.textContent = 'Cancelar envio publico';
+    cancelSectionTitle.style.cssText = 'font-size: 12px !important; font-weight: bold !important; margin: 12px 0 6px 0 !important;';
+    body.appendChild(cancelSectionTitle);
+
+    const cancelHelper = document.createElement('div');
+    cancelHelper.textContent = 'Selecione um tracking gerado pela API publica para cancelar o envio.';
+    cancelHelper.style.cssText = 'font-size: 11px !important; line-height: 1.4 !important; margin-bottom: 8px !important; color: #555 !important;';
+    body.appendChild(cancelHelper);
+
+    const cancelTrackingSelect = document.createElement('select');
+    cancelTrackingSelect.id = 'fedexCancelTrackingSelect';
+    cancelTrackingSelect.style.cssText = `
+      width: 100% !important;
+      margin-bottom: 8px !important;
+      padding: 8px !important;
+      border: 1px solid #ccc !important;
+      border-radius: 6px !important;
+    `;
+    cancelTrackingSelect.addEventListener('change', () => {
+      uiState.selectedCancellationTracking = cancelTrackingSelect.value || '';
+      populateCancellationOptions();
+    });
+    body.appendChild(cancelTrackingSelect);
+
+    const cancelHint = document.createElement('div');
+    cancelHint.id = 'fedexCancelHint';
+    cancelHint.style.cssText = 'font-size: 11px !important; line-height: 1.4 !important; margin-bottom: 8px !important; color: #666 !important;';
+    body.appendChild(cancelHint);
+
+    const cancelButton = document.createElement('button');
+    cancelButton.id = 'fedexCancelShipmentButton';
+    cancelButton.textContent = 'Cancelar tracking selecionado';
+    cancelButton.style.cssText = `
+      width: 100% !important;
+      margin-bottom: 8px !important;
+      padding: 10px 12px !important;
+      background: #b42318 !important;
+      color: white !important;
+      border: 0 !important;
+      border-radius: 8px !important;
+      cursor: pointer !important;
+      font-weight: bold !important;
+    `;
+    cancelButton.onclick = async () => {
+      const selectedAccount = getSelectedFedexAccount();
+
+      try {
+        clearInlineMessage();
+
+        if (!selectedAccount) {
+          throw new Error('Selecione uma conta FedEx antes de cancelar');
+        }
+
+        if (!uiState.selectedCancellationTracking) {
+          throw new Error('Selecione um tracking para cancelar');
+        }
+
+        cancelButton.disabled = true;
+        cancelButton.textContent = 'Cancelando...';
+
+        await cancelShipment(uiState.selectedCancellationTracking, selectedAccount.accountNumber);
+        await refreshCancelableShipments();
+        showInlineMessage(`Tracking ${uiState.selectedCancellationTracking} cancelado com sucesso.`, 'success');
+      } catch (error) {
+        console.error('Erro ao cancelar tracking:', error);
+        showInlineMessage(`Erro ao cancelar tracking: ${error.message}`, 'error');
+      } finally {
+        cancelButton.disabled = false;
+        cancelButton.textContent = 'Cancelar tracking selecionado';
+        populateCancellationOptions();
+      }
+    };
+    body.appendChild(cancelButton);
+
     const button = document.createElement('button');
     button.id = 'btnEnviarDrafts';
     button.textContent = 'Enviar e Imprimir Drafts';
@@ -1251,6 +1461,7 @@
         }
 
         console.log('%cProcessamento concluido', 'background: #28a745; color: white;', results);
+        await refreshCancelableShipments();
         showInlineMessage(`Sucesso: ${results.length} draft(s) enviados em modo ${printPreference.labelFormat}.`, 'success');
       } catch (error) {
         console.error('Erro no fluxo completo:', error);
@@ -1265,6 +1476,7 @@
     container.appendChild(body);
     document.body.appendChild(container);
     populateFedexSettingsForm();
+    refreshCancelableShipments();
     setReopenButtonVisible(false);
     applyPanelPosition(container, loadSavedPanelPosition());
     enablePanelDragging(container, titleBar);

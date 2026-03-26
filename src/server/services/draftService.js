@@ -248,6 +248,16 @@ function extractDraftDocuments(draft) {
     };
 }
 
+function extractTrackingNumber(draft) {
+    return (
+        draft?.shipmentResponse?.trackingNumber ||
+        draft?.shipmentResponse?.shipmentInfo?.masterTrackingNumber ||
+        draft?.shipmentResponse?.fullResponse?.output?.transactionShipments?.[0]?.masterTrackingNumber ||
+        draft?.trackingNumber ||
+        null
+    );
+}
+
 function selectDocumentUrlByType(documents, type = 'preferred') {
     switch (type) {
         case 'label':
@@ -636,6 +646,32 @@ module.exports = {
             logger.error('Erro ao deletar draft', error.message);
             throw error;
         }
+    },
+
+    markDraftAsCancelledByTrackingNumber(trackingNumber, metadata = {}) {
+        const normalizedTrackingNumber = String(trackingNumber || '').trim();
+
+        if (!normalizedTrackingNumber) {
+            throw new Error('trackingNumber e obrigatorio');
+        }
+
+        const drafts = loadDrafts();
+        const draftIndex = drafts.findIndex((item) => extractTrackingNumber(item) === normalizedTrackingNumber);
+
+        if (draftIndex === -1) {
+            throw new Error(`Draft nao encontrado para o tracking ${normalizedTrackingNumber}`);
+        }
+
+        drafts[draftIndex].status = 'CANCELLED';
+        drafts[draftIndex].cancelledAt = new Date().toISOString();
+        drafts[draftIndex].cancellation = {
+            trackingNumber: normalizedTrackingNumber,
+            accountNumber: metadata.accountNumber || null,
+            response: metadata.response || null
+        };
+
+        saveDrafts(drafts);
+        return drafts[draftIndex];
     },
 
     generateDraftSignature(draftData) {

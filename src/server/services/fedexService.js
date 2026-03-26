@@ -1,4 +1,5 @@
 const fedexClient = require('../clients/fedexClient');
+const fedexSettingsService = require('./fedexSettingsService');
 const logger = require('../utils/logger');
 
 function handleError(error, context) {
@@ -338,6 +339,53 @@ module.exports = {
     } catch (error) {
       logger.error('Erro ao rastrear envio', error.message);
       throw handleError(error, 'Erro ao rastrear envio FedEx');
+    }
+  },
+
+  async cancelShipment({ userId, trackingNumber, accountNumber }) {
+    try {
+      const normalizedTrackingNumber = String(trackingNumber || '').trim();
+
+      if (!userId) {
+        throw new Error('userId is required');
+      }
+
+      if (!normalizedTrackingNumber) {
+        throw new Error('trackingNumber is required');
+      }
+
+      const fedexSettings = fedexSettingsService.requireSelectedAccountByUserId(userId, accountNumber);
+      const payload = {
+        accountNumber: {
+          value: fedexSettings.accountNumber
+        },
+        trackingNumber: normalizedTrackingNumber
+      };
+
+      const response = await fedexClient.put('/ship/v1/shipments/cancel', payload, {
+        apiKey: fedexSettings.apiKey,
+        secretKey: fedexSettings.secretKey
+      });
+
+      logger.success('Shipment cancelado com sucesso', {
+        userId,
+        accountNumber: fedexSettings.accountNumber,
+        trackingNumber: normalizedTrackingNumber
+      });
+
+      return {
+        success: true,
+        trackingNumber: normalizedTrackingNumber,
+        accountNumber: fedexSettings.accountNumber,
+        response: response.data
+      };
+    } catch (error) {
+      logger.error('Erro ao cancelar shipment', {
+        statusCode: error.response?.status,
+        data: error.response?.data,
+        message: error.message
+      });
+      throw handleError(error, 'Erro ao cancelar shipment FedEx');
     }
   },
 

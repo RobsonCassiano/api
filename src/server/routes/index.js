@@ -19,6 +19,7 @@ router.post('/api/v1/shopify/orders/:id/mark-paid', shopifyController.markShopif
 
 // ========== FEDEX ==========
 router.post('/api/v1/fedex/shipments', fedexController.createFedexShipment);
+router.put('/api/v1/fedex/shipments/cancel', fedexController.cancelFedexShipment);
 router.get('/api/v1/fedex/tracking/:trackingNumber', fedexController.trackFedexShipment);
 router.get('/api/v1/fedex/token-status', fedexController.getTokenStatus);
 router.delete('/api/v1/fedex/token-cache', fedexController.clearTokenCache);
