@@ -1,0 +1,16 @@
+node_modules/
+.env
+.env.local
+.env.*.local
+dist/
+build/
+*.log
+storage/drafts/
+storage/preferences/
+!storage/.gitkeep
+!storage/preferences/.gitkeep
+.DS_Store
+.vscode/
+.idea/
+*.swp
+*.swo

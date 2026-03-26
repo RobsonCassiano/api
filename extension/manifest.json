@@ -1,0 +1,53 @@
+{
+  "manifest_version": 3,
+  "name": "FedEx PSDU Integrator",
+  "version": "1.0.0",
+  "description": "Shopify to FedEx integration with PSDU support",
+  "permissions": [
+    "cookies",
+    "storage",
+    "activeTab",
+    "scripting",
+    "clipboardWrite"
+  ],
+  "host_permissions": [
+    "https://www.fedex.com/*",
+    "https://*.apps.az.fxei.fedex.com/*",
+    "https://*.myshopify.com/*",
+    "https://apis.fedex.com/*",
+    "https://localhost:3000/*",
+    "http://localhost:3000/*"
+  ],
+  "background": {
+    "service_worker": "background.js"
+  },
+  "content_scripts": [
+    {
+      "matches": [
+        "https://www.fedex.com/shippingplus/pt-br/shipments-overview/*",
+        "https://www.fedex.com/shippingplus/shipments-overview/*",
+        "https://*.apps.az.fxei.fedex.com/shipments*",
+        "https://magicplus-magicplus.apps.az.fxei.fedex.com/*"
+      ],
+      "js": [
+        "content.js"
+      ],
+      "run_at": "document_start"
+    }
+  ],
+  "action": {
+    "default_title": "document_idle"
+  },
+  "web_accessible_resources": [
+    {
+      "resources": [
+        "injected.js"
+      ],
+      "matches": [
+        "https://www.fedex.com/*",
+        "https://*.apps.az.fxei.fedex.com/*",
+        "https://magicplus-magicplus.apps.az.fxei.fedex.com/*"
+      ]
+    }
+  ]
+}
