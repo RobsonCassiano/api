@@ -364,8 +364,32 @@
     return draft?.outboundShipmentInformation?.bookingDetails?.userId || null;
   }
 
+  function getCookieValue(name) {
+    const encodedName = `${name}=`;
+    const cookies = String(document.cookie || '').split(';');
+
+    for (const rawCookie of cookies) {
+      const cookie = rawCookie.trim();
+      if (!cookie.startsWith(encodedName)) {
+        continue;
+      }
+
+      return decodeURIComponent(cookie.slice(encodedName.length)).trim();
+    }
+
+    return '';
+  }
+
+  function getUserIdFromPageCookies() {
+    return (
+      getCookieValue('sc_fcl_uuid') ||
+      getCookieValue('fcl_uuid') ||
+      ''
+    );
+  }
+
   function getCurrentUserId() {
-    return uiState.currentUserId || getDraftUserId(window.__READY_TO_FINALIZE__?.[0]) || null;
+    return uiState.currentUserId || getUserIdFromPageCookies() || getDraftUserId(window.__READY_TO_FINALIZE__?.[0]) || null;
   }
 
   function requestFedexSessionFromExtension() {
@@ -403,6 +427,7 @@
     const existingUserId = getCurrentUserId();
 
     if (existingUserId) {
+      uiState.currentUserId = existingUserId;
       return existingUserId;
     }
 
@@ -935,22 +960,76 @@
     window.open(withAutoPrint(url), '_blank', popupFeatures);
   }
 
-  function handleShipmentPrinting(result, printPreference) {
-    const documents = result?.documents;
-    const labelUrl = documents?.documents?.labelUrl || result?.shipmentLinks?.labelUrl || null;
-    const additionalDocsUrl = documents?.additionalDocumentationUrl || documents?.documentationUrl || null;
+  function base64ToBlob(base64Content, mimeType = 'application/pdf') {
+    const binaryString = window.atob(base64Content);
+    const bytes = new Uint8Array(binaryString.length);
 
-    if (printPreference?.labelFormat === 'thermal') {
-      openDocumentUrl(labelUrl);
+    for (let index = 0; index < binaryString.length; index++) {
+      bytes[index] = binaryString.charCodeAt(index);
+    }
 
-      if (additionalDocsUrl && additionalDocsUrl !== labelUrl) {
-        openDocumentUrl(`${BACKEND_BASE_URL}/api/v1/drafts/${encodeURIComponent(result.draftId)}/documents/open?type=additional&autoPrint=true`);
-      }
+    return new Blob([bytes], { type: mimeType });
+  }
 
+  function openEncodedDocument(base64Content, fileName) {
+    if (!base64Content) {
       return;
     }
 
-    openDocumentUrl(`${BACKEND_BASE_URL}/api/v1/drafts/${encodeURIComponent(result.draftId)}/documents/open?type=preferred&autoPrint=true`);
+    const blob = base64ToBlob(base64Content, 'application/pdf');
+    const objectUrl = window.URL.createObjectURL(blob);
+    const popup = window.open(objectUrl, '_blank', 'popup=yes,width=1100,height=800,left=120,top=80,noopener,noreferrer');
+
+    if (!popup) {
+      const link = document.createElement('a');
+      link.href = objectUrl;
+      link.target = '_blank';
+      link.rel = 'noopener noreferrer';
+      link.download = fileName || 'documento-fedex.pdf';
+      document.body.appendChild(link);
+      link.click();
+      link.remove();
+    }
+
+    window.setTimeout(() => {
+      window.URL.revokeObjectURL(objectUrl);
+    }, 60000);
+  }
+
+  async function fetchEncodedDraftDocuments(draftId) {
+    const response = await originalFetch(`${BACKEND_BASE_URL}/api/v1/drafts/${encodeURIComponent(draftId)}/documents/encoded`);
+    const data = await response.json().catch(() => null);
+
+    if (!response.ok) {
+      throw new Error(data?.error || `Falha ao carregar documentos codificados (HTTP ${response.status})`);
+    }
+
+    return data;
+  }
+
+  function handleShipmentPrinting(result, printPreference) {
+    return fetchEncodedDraftDocuments(result?.draftId).then((payload) => {
+      const names = Array.isArray(payload?.encodedDocumentNames) ? payload.encodedDocumentNames : [];
+      const documents = Array.isArray(payload?.encodedDocuments) ? payload.encodedDocuments : [];
+
+      if (!documents.length) {
+        throw new Error('Nenhum documento codificado retornado para impressao');
+      }
+
+      if (printPreference?.labelFormat === 'thermal') {
+        openEncodedDocument(documents[0], names[0]);
+
+        for (let index = 1; index < documents.length; index++) {
+          openEncodedDocument(documents[index], names[index]);
+        }
+
+        return;
+      }
+
+      documents.forEach((documentBase64, index) => {
+        openEncodedDocument(documentBase64, names[index]);
+      });
+    });
   }
 
   async function processDraftEndToEnd(draft, index, total, options = {}) {
@@ -961,7 +1040,7 @@
     const shipmentResult = await sendDraftToFedex(savedDraft.id, options);
 
     if (options?.printPreference?.autoOpenDocuments !== false) {
-      handleShipmentPrinting(shipmentResult, options?.printPreference);
+      await handleShipmentPrinting(shipmentResult, options?.printPreference);
     }
 
     return {

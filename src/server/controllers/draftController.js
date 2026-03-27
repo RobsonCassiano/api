@@ -102,6 +102,22 @@ module.exports = {
     },
 
     /**
+     * Retornar documentos do draft em base64, no estilo da UI FedEx
+     * GET /api/v1/drafts/:id/documents/encoded
+     */
+    async getEncodedDraftDocuments(req, res) {
+        try {
+            const { id } = req.params;
+            const documents = await draftService.getEncodedDraftDocuments(id);
+
+            res.json(documents);
+        } catch (error) {
+            logger.error('Erro em getEncodedDraftDocuments controller:', error.message);
+            res.status(404).json({ error: error.message });
+        }
+    },
+
+    /**
      * Processar draft e enviar para FedEx
      * POST /api/v1/drafts/:id/send-to-fedex
      */

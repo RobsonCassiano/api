@@ -1,10 +1,36 @@
+const FEDEX_COOKIE_URLS = [
+  'https://www.fedex.com/shippingplus/pt-br/shipments-overview/all-shipments',
+  'https://www.fedex.com/pt-br/home.html',
+  'https://www.fedex.com/',
+  'https://magicplus-magicplus.apps.az.fxei.fedex.com/'
+];
+
+async function getFedexCookies() {
+  const cookieMap = new Map();
+
+  for (const url of FEDEX_COOKIE_URLS) {
+    try {
+      const cookies = await chrome.cookies.getAll({ url });
+      cookies.forEach((cookie) => {
+        const key = `${cookie.domain}|${cookie.path}|${cookie.name}`;
+        if (!cookieMap.has(key)) {
+          cookieMap.set(key, cookie);
+        }
+      });
+    } catch (error) {
+      console.warn('Erro ao consultar cookies para URL:', url, error);
+    }
+  }
+
+  return Array.from(cookieMap.values());
+}
+
 async function isFedexLoggedIn() {
   try {
-    const cookies = await chrome.cookies.getAll({
-      url: 'https://www.fedex.com/'
-    });
+    const cookies = await getFedexCookies();
 
     const hasLoginCookie = cookies.some((c) =>
+      c.name === 'sc_fcl_uuid' ||
       c.name === 'fcl_uuid' ||
       c.name === 'fdx_login' ||
       c.name === 'pwg' ||
@@ -39,11 +65,10 @@ function validateUserLogin(loginData) {
 
 async function getFedexSession() {
   try {
-    const cookies = await chrome.cookies.getAll({
-      url: 'https://www.fedex.com/'
-    });
+    const cookies = await getFedexCookies();
 
-    const uuidCookie = cookies.find((c) => c.name === 'fcl_uuid');
+    const uuidCookie = cookies.find((c) => c.name === 'sc_fcl_uuid')
+      || cookies.find((c) => c.name === 'fcl_uuid');
     const loginCookie = cookies.find((c) => c.name === 'fdx_login');
 
     if (uuidCookie?.value) {
@@ -55,7 +80,7 @@ async function getFedexSession() {
     }
 
     if (!loginCookie) {
-      console.log('Cookies fcl_uuid e fdx_login nao encontrados');
+      console.log('Cookies sc_fcl_uuid, fcl_uuid e fdx_login nao encontrados');
       return null;
     }
 

@@ -1,5 +1,6 @@
 const fs = require('fs');
 const path = require('path');
+const axios = require('axios');
 const logger = require('../utils/logger');
 const fedexService = require('./fedexService');
 const printPreferenceService = require('./printPreferenceService');
@@ -294,6 +295,78 @@ function withAutoPrint(url, enabled = false) {
     }
 }
 
+function sanitizeFileName(value) {
+    return String(value || '')
+        .replace(/[<>:"/\\|?*\x00-\x1F]/g, '-')
+        .replace(/\s+/g, '-')
+        .replace(/-+/g, '-')
+        .replace(/^-|-$/g, '');
+}
+
+function buildDocumentFileName(baseTimestamp, contentType) {
+    const labels = {
+        LABEL: 'Etiqueta-de-envio-FedEx',
+        COMMERCIAL_INVOICE: 'Fatura-comercial-FedEx',
+        MERGED_LABEL_DOCUMENTS: 'Documentos-unificados-FedEx',
+        TRANSACTION_RECORD: 'Registro-de-transacao-FedEx'
+    };
+
+    const label = labels[contentType] || `Documento-${contentType || 'FedEx'}`;
+    return `${baseTimestamp}-${sanitizeFileName(label)}.pdf`;
+}
+
+function getEncodableDocumentEntries(draft) {
+    const documents = extractDraftDocuments(draft);
+    const shipmentResponse = draft?.shipmentResponse || {};
+    const transactionShipment = shipmentResponse?.fullResponse?.output?.transactionShipments?.[0] || {};
+    const entries = [];
+
+    if (documents?.documents?.labelUrl) {
+        entries.push({
+            contentType: 'LABEL',
+            url: documents.documents.labelUrl
+        });
+    }
+
+    if (documents?.documents?.invoiceUrl) {
+        entries.push({
+            contentType: 'COMMERCIAL_INVOICE',
+            url: documents.documents.invoiceUrl
+        });
+    }
+
+    if (documents?.documents?.mergedLabelUrl) {
+        entries.push({
+            contentType: 'MERGED_LABEL_DOCUMENTS',
+            url: documents.documents.mergedLabelUrl
+        });
+    }
+
+    const transactionRecordUrl = transactionShipment?.shipmentDocuments
+        ?.find((item) => item?.contentType === 'TRANSACTION_RECORD' && item?.url)
+        ?.url || null;
+
+    if (transactionRecordUrl) {
+        entries.push({
+            contentType: 'TRANSACTION_RECORD',
+            url: transactionRecordUrl
+        });
+    }
+
+    return entries.filter((entry, index, array) =>
+        entry.url && array.findIndex((item) => item.url === entry.url) === index
+    );
+}
+
+async function downloadDocumentAsBase64(url) {
+    const response = await axios.get(url, {
+        responseType: 'arraybuffer',
+        timeout: 15000
+    });
+
+    return Buffer.from(response.data).toString('base64');
+}
+
 function extractDraftUserId(draftData) {
     return (
         draftData?.outboundShipmentInformation?.bookingDetails?.userId ||
@@ -304,18 +377,26 @@ function extractDraftUserId(draftData) {
 
 function buildLabelSpecification(printPreference) {
     const isThermal = printPreference?.labelFormat === 'thermal';
+    const customerSpecifiedDetail = {
+        maskedData: [
+            'TRANSPORTATION_CHARGES_PAYOR_ACCOUNT_NUMBER',
+            'DUTIES_AND_TAXES_PAYOR_ACCOUNT_NUMBER'
+        ]
+    };
 
     if (isThermal) {
         return {
             labelFormatType: 'COMMON2D',
             imageType: 'PDF',
-            labelStockType: 'STOCK_4X675'
+            labelStockType: 'STOCK_4X675',
+            customerSpecifiedDetail
         };
     }
 
     return {
         imageType: 'PDF',
-        labelStockType: 'PAPER_85X11_TOP_HALF_LABEL'
+        labelStockType: 'PAPER_85X11_TOP_HALF_LABEL',
+        customerSpecifiedDetail
     };
 }
 
@@ -522,6 +603,44 @@ module.exports = {
             logger.error('Erro ao obter documento preferencial do draft', error.message);
             throw error;
         }
+    },
+
+    async getEncodedDraftDocuments(draftId) {
+        const draft = await this.getDraftById(draftId);
+        const entries = getEncodableDocumentEntries(draft);
+
+        if (!entries.length) {
+            throw new Error(`Nenhum documento disponivel para codificacao no draft: ${draftId}`);
+        }
+
+        const timestampBase = sanitizeFileName(
+            new Date(draft?.processedAt || draft?.createdAt || Date.now()).toISOString().replace(/\.\d{3}Z$/, '')
+        );
+
+        const encodedDocuments = [];
+        const encodedDocumentNames = [];
+        const documents = [];
+
+        for (const entry of entries) {
+            const encodedContent = await downloadDocumentAsBase64(entry.url);
+            const fileName = buildDocumentFileName(timestampBase, entry.contentType);
+
+            encodedDocuments.push(encodedContent);
+            encodedDocumentNames.push(fileName);
+            documents.push({
+                contentType: entry.contentType,
+                url: entry.url,
+                fileName
+            });
+        }
+
+        return {
+            draftId,
+            trackingNumber: extractTrackingNumber(draft),
+            encodedDocumentNames,
+            encodedDocuments,
+            documents
+        };
     },
 
     async processDraftAndSendToFedex(draftId, options = {}) {

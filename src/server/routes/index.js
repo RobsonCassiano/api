@@ -29,6 +29,7 @@ router.post('/api/v1/drafts/save', draftController.saveDraft);
 router.get('/api/v1/drafts', draftController.getAllDrafts);
 router.get('/api/v1/drafts/:id', draftController.getDraftById);
 router.get('/api/v1/drafts/:id/documents', draftController.getDraftDocuments);
+router.get('/api/v1/drafts/:id/documents/encoded', draftController.getEncodedDraftDocuments);
 router.get('/api/v1/drafts/:id/documents/open', draftController.openDraftDocument);
 router.post('/api/v1/drafts/:id/send-to-fedex', draftController.sendDraftToFedex);
 router.post('/api/v1/drafts/:id/mark-finalized', draftController.markDraftAsFinalizedInUi);

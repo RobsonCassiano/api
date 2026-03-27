@@ -23,7 +23,7 @@
   "content_scripts": [
     {
       "matches": [
-        "https://www.fedex.com/shippingplus/*",
+        "https://www.fedex.com/*",
         "https://*.apps.az.fxei.fedex.com/*",
         "https://magicplus-magicplus.apps.az.fxei.fedex.com/*"
       ],
