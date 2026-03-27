@@ -397,6 +397,28 @@
     return uiState.currentUserId || getUserIdFromPageCookies() || getDraftUserId(window.__READY_TO_FINALIZE__?.[0]) || null;
   }
 
+  async function syncUserState(userId) {
+    const normalizedUserId = String(userId || '').trim();
+
+    if (!normalizedUserId) {
+      return null;
+    }
+
+    uiState.currentUserId = normalizedUserId;
+    uiState.printPreference = await fetchPrintPreference(normalizedUserId);
+    uiState.fedexSettings = await fetchFedexSettings(normalizedUserId);
+    uiState.fedexSettingsMode = uiState.fedexSettings.accounts?.length ? 'summary' : 'create';
+
+    const select = document.getElementById('fedexPrintMode');
+    if (select) {
+      select.value = uiState.printPreference.labelFormat;
+    }
+
+    populateFedexSettingsForm();
+    await refreshCancelableShipments();
+    return normalizedUserId;
+  }
+
   function requestFedexSessionFromExtension() {
     return new Promise((resolve) => {
       const requestId = `fedex-psdu-${Date.now()}-${Math.random().toString(16).slice(2)}`;
@@ -432,6 +454,18 @@
     const existingUserId = getCurrentUserId();
 
     if (existingUserId) {
+      const shouldSyncExistingUser =
+        uiState.currentUserId !== existingUserId ||
+        (!uiState.fedexSettings.configured && (!uiState.fedexSettings.accounts || !uiState.fedexSettings.accounts.length));
+
+      if (shouldSyncExistingUser) {
+        try {
+          return await syncUserState(existingUserId);
+        } catch (error) {
+          console.error('Erro ao sincronizar usuario atual:', error);
+        }
+      }
+
       uiState.currentUserId = existingUserId;
       return existingUserId;
     }
@@ -446,11 +480,7 @@
     uiState.currentUserId = nextUserId;
 
     try {
-      uiState.printPreference = await fetchPrintPreference(nextUserId);
-      uiState.fedexSettings = await fetchFedexSettings(nextUserId);
-      uiState.fedexSettingsMode = uiState.fedexSettings.accounts?.length ? 'summary' : 'create';
-      populateFedexSettingsForm();
-      await refreshCancelableShipments();
+      await syncUserState(nextUserId);
     } catch (error) {
       console.error('Erro ao sincronizar sessao FedEx:', error);
     }
@@ -924,18 +954,7 @@
       return;
     }
 
-    uiState.currentUserId = nextUserId;
-    uiState.printPreference = await fetchPrintPreference(nextUserId);
-    uiState.fedexSettings = await fetchFedexSettings(nextUserId);
-    uiState.fedexSettingsMode = uiState.fedexSettings.accounts?.length ? 'summary' : 'create';
-
-    const select = document.getElementById('fedexPrintMode');
-    if (select) {
-      select.value = uiState.printPreference.labelFormat;
-    }
-
-    populateFedexSettingsForm();
-    await refreshCancelableShipments();
+    await syncUserState(nextUserId);
   }
 
   async function saveDraftToBackend(draft) {
