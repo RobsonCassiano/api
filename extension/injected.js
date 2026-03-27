@@ -643,6 +643,7 @@
     const inlineMessage = document.getElementById('fedexInlineMessage');
     const selectedAccount = getSelectedFedexAccount();
     const hasAccounts = Array.isArray(uiState.fedexSettings.accounts) && uiState.fedexSettings.accounts.length > 0;
+    const isCompactSummary = hasAccounts && uiState.fedexSettingsMode === 'summary';
 
     if (apiKeyInput && accountNumberInput && secretKeyInput) {
       if (uiState.fedexSettingsMode === 'edit' && selectedAccount) {
@@ -657,8 +658,8 @@
     }
 
     if (status) {
-      if (uiState.fedexSettingsMode === 'summary' && hasAccounts) {
-        status.textContent = 'Conta FedEx pronta para uso.';
+      if (isCompactSummary) {
+        status.textContent = 'Credenciais FedEx salvas para este usuario.';
         status.style.color = '#1e7e34';
       } else if (!hasAccounts) {
         status.textContent = 'Cadastre a primeira conta FedEx para este usuario.';
@@ -697,12 +698,15 @@
         accountSelect.appendChild(newOption);
         accountSelect.disabled = false;
       }
+
+      accountSelect.style.display = isCompactSummary ? 'none' : 'block';
     }
 
     if (accountSummary) {
-      accountSummary.textContent = selectedAccount
-        ? `Conta ativa: ${selectedAccount.accountNumber}`
-        : 'Nenhuma conta ativa';
+      accountSummary.textContent = isCompactSummary
+        ? 'Conta pronta para uso.'
+        : (selectedAccount ? `Conta ativa: ${selectedAccount.accountNumber}` : 'Nenhuma conta ativa');
+      accountSummary.style.display = isCompactSummary ? 'none' : 'block';
     }
 
     if (accountActions) {
