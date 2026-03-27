@@ -22,7 +22,12 @@
     fedexSettings: { ...DEFAULT_FEDEX_SETTINGS },
     fedexSettingsMode: 'summary',
     cancelableShipments: [],
-    selectedCancellationTracking: ''
+    selectedCancellationTracking: '',
+    backendStatus: {
+      source: BACKEND_BASE_URL,
+      lastSyncOk: false,
+      lastSyncMessage: 'Aguardando sincronizacao'
+    }
   };
 
   function clamp(value, min, max) {
@@ -497,8 +502,21 @@
     const data = await response.json().catch(() => null);
 
     if (!response.ok) {
+      uiState.backendStatus = {
+        source: BACKEND_BASE_URL,
+        lastSyncOk: false,
+        lastSyncMessage: `Falha ao carregar credenciais (${response.status})`
+      };
       throw new Error(data?.error || `Falha ao carregar configuracoes FedEx (HTTP ${response.status})`);
     }
+
+    uiState.backendStatus = {
+      source: BACKEND_BASE_URL,
+      lastSyncOk: true,
+      lastSyncMessage: data?.configured
+        ? `Credenciais carregadas: ${data.accounts?.length || 0} conta(s)`
+        : 'Nenhuma credencial encontrada no backend'
+    };
 
     return {
       ...DEFAULT_FEDEX_SETTINGS,
@@ -641,6 +659,7 @@
     const deleteAccountLink = document.getElementById('fedexDeleteAccountLink');
     const formSection = document.getElementById('fedexSettingsFormSection');
     const inlineMessage = document.getElementById('fedexInlineMessage');
+    const backendHint = document.getElementById('fedexBackendHint');
     const selectedAccount = getSelectedFedexAccount();
     const hasAccounts = Array.isArray(uiState.fedexSettings.accounts) && uiState.fedexSettings.accounts.length > 0;
     const isCompactSummary = hasAccounts && uiState.fedexSettingsMode === 'summary';
@@ -672,6 +691,11 @@
 
     if (userHint) {
       userHint.textContent = `Usuario atual: ${getCurrentUserId() || 'aguardando captura do draft'}`;
+    }
+
+    if (backendHint) {
+      backendHint.textContent = `Backend: ${uiState.backendStatus.source} | ${uiState.backendStatus.lastSyncMessage}`;
+      backendHint.style.color = uiState.backendStatus.lastSyncOk ? '#1e7e34' : '#666';
     }
 
     if (accountSelect) {
@@ -1104,7 +1128,6 @@
 
     try {
       const url = extractUrl(args);
-      console.log('%cFETCH interceptado:', 'color: #0066cc;', url);
 
       if (isShipmentListUrl(url)) {
         await captureReadyToFinalize(response, url);
@@ -1263,6 +1286,11 @@
     userHint.id = 'fedexUserHint';
     userHint.style.cssText = 'font-size: 11px !important; line-height: 1.4 !important; margin-bottom: 8px !important; color: #666 !important;';
     body.appendChild(userHint);
+
+    const backendHint = document.createElement('div');
+    backendHint.id = 'fedexBackendHint';
+    backendHint.style.cssText = 'font-size: 11px !important; line-height: 1.4 !important; margin-bottom: 8px !important; color: #666 !important;';
+    body.appendChild(backendHint);
 
     const accountSummary = document.createElement('div');
     accountSummary.id = 'fedexAccountSummary';
