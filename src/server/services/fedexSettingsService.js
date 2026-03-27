@@ -1,5 +1,6 @@
 const fs = require('fs');
 const path = require('path');
+const crypto = require('crypto');
 
 const logger = require('../utils/logger');
 
@@ -7,6 +8,7 @@ const DATA_DIR = process.env.PREFERENCES_DIR
     ? path.resolve(process.env.PREFERENCES_DIR)
     : path.join(process.cwd(), 'storage', 'preferences');
 const DATA_FILE = path.join(DATA_DIR, 'fedex-settings.json');
+const ENCRYPTION_PREFIX = 'enc:v1:';
 
 function ensureStorage() {
     if (!fs.existsSync(DATA_DIR)) {
@@ -50,10 +52,102 @@ function normalizeSettings(input = {}) {
     };
 }
 
+function getEncryptionSecret() {
+    return String(process.env.PREFERENCES_ENCRYPTION_KEY || '').trim();
+}
+
+function hasEncryptionConfigured() {
+    return Boolean(getEncryptionSecret());
+}
+
+function buildCipherKey() {
+    return crypto
+        .createHash('sha256')
+        .update(getEncryptionSecret(), 'utf8')
+        .digest();
+}
+
+function encryptValue(value) {
+    const normalizedValue = String(value || '').trim();
+
+    if (!normalizedValue) {
+        return '';
+    }
+
+    if (!hasEncryptionConfigured()) {
+        return normalizedValue;
+    }
+
+    const iv = crypto.randomBytes(12);
+    const cipher = crypto.createCipheriv('aes-256-gcm', buildCipherKey(), iv);
+    const encrypted = Buffer.concat([
+        cipher.update(normalizedValue, 'utf8'),
+        cipher.final()
+    ]);
+    const tag = cipher.getAuthTag();
+
+    return `${ENCRYPTION_PREFIX}${iv.toString('base64')}:${tag.toString('base64')}:${encrypted.toString('base64')}`;
+}
+
+function decryptValue(value) {
+    const normalizedValue = String(value || '').trim();
+
+    if (!normalizedValue) {
+        return '';
+    }
+
+    if (!normalizedValue.startsWith(ENCRYPTION_PREFIX)) {
+        return normalizedValue;
+    }
+
+    if (!hasEncryptionConfigured()) {
+        throw new Error('PREFERENCES_ENCRYPTION_KEY nao configurada para ler credenciais criptografadas');
+    }
+
+    const payload = normalizedValue.slice(ENCRYPTION_PREFIX.length);
+    const [ivBase64, tagBase64, encryptedBase64] = payload.split(':');
+
+    if (!ivBase64 || !tagBase64 || !encryptedBase64) {
+        throw new Error('Formato de credencial criptografada invalido');
+    }
+
+    const decipher = crypto.createDecipheriv(
+        'aes-256-gcm',
+        buildCipherKey(),
+        Buffer.from(ivBase64, 'base64')
+    );
+    decipher.setAuthTag(Buffer.from(tagBase64, 'base64'));
+
+    const decrypted = Buffer.concat([
+        decipher.update(Buffer.from(encryptedBase64, 'base64')),
+        decipher.final()
+    ]);
+
+    return decrypted.toString('utf8').trim();
+}
+
+function deserializeStoredSettings(input = {}) {
+    return normalizeSettings({
+        accountNumber: input.accountNumber,
+        apiKey: decryptValue(input.apiKey),
+        secretKey: decryptValue(input.secretKey)
+    });
+}
+
+function serializeSettingsForStorage(input = {}) {
+    const normalized = normalizeSettings(input);
+
+    return {
+        accountNumber: normalized.accountNumber,
+        apiKey: encryptValue(normalized.apiKey),
+        secretKey: encryptValue(normalized.secretKey)
+    };
+}
+
 function normalizeUserRecord(record = {}) {
     const accounts = Array.isArray(record.accounts)
         ? record.accounts
-            .map((item) => normalizeSettings(item))
+            .map((item) => deserializeStoredSettings(item))
             .filter((item) => item.accountNumber)
         : [];
 
@@ -129,14 +223,17 @@ module.exports = {
 
         settings[normalizedUserId] = {
             selectedAccountNumber: nextSettings.accountNumber,
-            accounts: nextAccounts.sort((a, b) => a.accountNumber.localeCompare(b.accountNumber))
+            accounts: nextAccounts
+                .sort((a, b) => a.accountNumber.localeCompare(b.accountNumber))
+                .map((item) => serializeSettingsForStorage(item))
         };
 
         saveSettings(settings);
 
         logger.info('Configuracoes FedEx salvas', {
             userId: normalizedUserId,
-            accountNumber: nextSettings.accountNumber
+            accountNumber: nextSettings.accountNumber,
+            encrypted: hasEncryptionConfigured()
         });
 
         return buildResponse(normalizedUserId, settings[normalizedUserId]);
@@ -160,7 +257,7 @@ module.exports = {
 
         settings[normalizedUserId] = {
             selectedAccountNumber: nextAccounts[0]?.accountNumber || '',
-            accounts: nextAccounts
+            accounts: nextAccounts.map((item) => serializeSettingsForStorage(item))
         };
 
         saveSettings(settings);
@@ -194,6 +291,7 @@ module.exports = {
             selectedAccountNumber: normalizedAccountNumber
         };
 
+        settings[normalizedUserId].accounts = currentRecord.accounts.map((item) => serializeSettingsForStorage(item));
         saveSettings(settings);
         return buildResponse(normalizedUserId, settings[normalizedUserId]);
     },

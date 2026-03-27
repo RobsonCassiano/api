@@ -23,6 +23,15 @@ app.use((req, res, next) => {
 });
 
 // Health check
+app.get('/', (req, res) => {
+  res.json({
+    name: 'fedex-shipping-api',
+    status: 'online',
+    health: '/health',
+    apiBase: '/api/v1'
+  });
+});
+
 app.get('/health', (req, res) => {
   res.json({ status: 'ok' });
 });
