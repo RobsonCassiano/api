@@ -6,6 +6,7 @@
   "scripts": {
     "start": "node src/server/server.js",
     "dev": "nodemon src/server/server.js",
+    "extension:build": "node scripts/build-extension.js",
     "extension:watch": "echo 'Extension ready. Load ./extension in Chrome extensions page'",
     "sync:render-preferences": "node scripts/sync-render-preferences.js"
   },
@@ -27,6 +28,7 @@
     "pdf-lib": "^1.17.1"
   },
   "devDependencies": {
+    "archiver": "^7.0.1",
     "nodemon": "^3.0.1"
   }
 }
