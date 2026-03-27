@@ -182,8 +182,11 @@ window.addEventListener('message', (event) => {
   delete payload._fromInjected;
   delete payload.requestId;
 
+  console.log(`🌉 [content.js] Relayando mensagem do injected.js:`, messageType, 'requestId:', requestId);
+
   // Encaminhar para background.js
   chrome.runtime.sendMessage(payload, (response) => {
+    console.log(`🌉 [content.js] Resposta recebida de background.js:`, messageType, response);
     // Retornar resposta para injected.js com o mesmo requestId
     window.postMessage(
       {

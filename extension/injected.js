@@ -39,6 +39,7 @@
   function sendMessageToBackground(message) {
     return new Promise((resolve, reject) => {
       const requestId = `${Date.now()}-${Math.random().toString(16).slice(2)}`;
+      console.log(`📤 [injected.js] Enviando mensagem:`, message.type, 'requestId:', requestId);
       const timeoutId = setTimeout(() => {
         window.removeEventListener('message', handler);
         reject(new Error(`Request timeout: ${message.type}`));
@@ -50,6 +51,8 @@
 
         window.removeEventListener('message', handler);
         clearTimeout(timeoutId);
+
+        console.log(`📥 [injected.js] Resposta recebida:`, message.type, event.data);
 
         if (event.data?.error) {
           reject(new Error(event.data.error));
@@ -690,16 +693,10 @@
   }
 
   async function savePrintPreference(userId, preference) {
-    userId = userId || await ensureCurrentUserId();
-
-    if (!userId) {
-      return;
-    }
-
     try {
       const response = await sendMessageToBackground({
         type: 'SAVE_PRINT_PREFERENCE',
-        userId,
+        userId: userId || null,
         preference
       });
       if (!response || !response.ok) {
@@ -713,16 +710,10 @@
   }
 
   async function saveFedexSettings(userId, settings) {
-    userId = userId || await ensureCurrentUserId();
-
-    if (!userId) {
-      throw new Error('Usuario FedEx nao identificado na tela atual');
-    }
-
     try {
       const response = await sendMessageToBackground({
         type: 'SAVE_FEDEX_SETTINGS',
-        userId,
+        userId: userId || null,
         settings
       });
       if (!response || !response.ok) {
@@ -736,23 +727,17 @@
   }
 
   async function selectFedexAccount(userId, accountNumber) {
-    userId = userId || await ensureCurrentUserId();
-
-    if (!userId) {
-      throw new Error('Usuario FedEx nao identificado na tela atual');
-    }
-
     try {
       const response = await sendMessageToBackground({
         type: 'SELECT_FEDEX_ACCOUNT',
-        userId,
+        userId: userId || null,
         accountNumber
       });
       if (!response || !response.ok) {
         throw new Error(response?.error || 'Falha ao selecionar conta FedEx');
       }
-          uiState.fedexSettings = { ...DEFAULT_FEDEX_SETTINGS, ...(response.data || {}) };
-          return response.data;
+      uiState.fedexSettings = { ...DEFAULT_FEDEX_SETTINGS, ...(response.data || {}) };
+      return response.data;
     } catch (error) {
       throw error;
     }
@@ -1059,12 +1044,6 @@
   }
 
   async function cancelShipment(trackingNumber, accountNumber) {
-    const userId = await ensureCurrentUserId();
-
-    if (!userId) {
-      throw new Error('Usuario FedEx nao identificado na tela atual');
-    }
-
     if (!trackingNumber) {
       throw new Error('Selecione um tracking para cancelar');
     }
@@ -1072,7 +1051,7 @@
     try {
       const response = await sendMessageToBackground({
         type: 'CANCEL_SHIPMENT',
-        userId,
+        userId: null,
         accountNumber,
         trackingNumber
       });

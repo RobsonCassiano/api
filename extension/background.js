@@ -135,6 +135,20 @@ async function getFedexSession() {
 }
 
 /**
+ * NOVO: Obter userId do contexto (cookies ou armazenamento)
+ * Usado para validar userId nulo nas requisições de save
+ */
+async function getCurrentUserId() {
+  try {
+    const session = await getFedexSession();
+    return session?.userId || null;
+  } catch (error) {
+    console.error('Erro ao obter userId:', error);
+    return null;
+  }
+}
+
+/**
  * NOVO: Limpar dados sensíveis quando fazer logout
  * Chamado quando: usuário faz logout, sessão expira, etc
  */
@@ -202,9 +216,14 @@ async function backendFetch(method, endpoint, body = null) {
   
   const options = {
     method,
-    headers: { 'Content-Type': 'application/json' },
-    targetAddressSpace: 'private'
+    headers: { 'Content-Type': 'application/json' }
   };
+  
+  // Apenas usar targetAddressSpace: 'private' para URLs de endereços privados (localhost, IPs locais)
+  // URLs externas (render.com, etc) não devem ter essa opção
+  if (backendUrl && (backendUrl.includes('localhost') || backendUrl.includes('127.0.0.1') || backendUrl.includes('192.168.'))) {
+    options.targetAddressSpace = 'private';
+  }
   
   if (body && (method === 'PUT' || method === 'POST')) {
     options.body = JSON.stringify(body);
@@ -212,19 +231,26 @@ async function backendFetch(method, endpoint, body = null) {
   
   console.log(`📤 [backendFetch] ${method} ${url}`);
   
-  const response = await fetch(url, options);
-  const data = await response.json().catch(() => null);
-  
-  if (!response.ok) {
-    console.error(`❌ [backendFetch] ${response.status}`, data);
-    throw new Error(data?.error || `HTTP ${response.status}`);
+  try {
+    const response = await fetch(url, options);
+    const data = await response.json().catch(() => null);
+    
+    if (!response.ok) {
+      console.error(`❌ [backendFetch] ${response.status}`, data);
+      throw new Error(data?.error || `HTTP ${response.status}`);
+    }
+    
+    console.log(`✅ [backendFetch] ${method} ${url}`);
+    return data;
+  } catch (error) {
+    console.error(`❌ [backendFetch] Erro ao fazer fetch ${method} ${url}:`, error.message);
+    throw error;
   }
-  
-  console.log(`✅ [backendFetch] ${method} ${url}`);
-  return data;
 }
 
 chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
+  console.log(`📨 [background.js] Mensagem recebida:`, msg.type, msg);
+
   if (msg.type === 'CHECK_FEDEX_LOGIN') {
     isFedexLoggedIn().then((loggedIn) => {
       console.log('Respondendo CHECK_FEDEX_LOGIN:', loggedIn);
@@ -321,9 +347,16 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
   // 🌐 HANDLERS PARA REQUISIÇÕES DO BACKEND
   
   if (msg.type === 'FETCH_PRINT_PREFERENCE') {
+    console.log(`📥 [background.js] FETCH_PRINT_PREFERENCE, userId:`, msg.userId);
     backendFetch('GET', `/api/v1/users/${encodeURIComponent(msg.userId)}/print-preferences`)
-      .then((data) => sendResponse({ ok: true, data }))
-      .catch((err) => sendResponse({ ok: false, error: err.message }));
+      .then((data) => {
+        console.log(`✅ [background.js] FETCH_PRINT_PREFERENCE sucesso, respondendo`);
+        sendResponse({ ok: true, data });
+      })
+      .catch((err) => {
+        console.error(`❌ [background.js] FETCH_PRINT_PREFERENCE erro:`, err.message);
+        sendResponse({ ok: false, error: err.message });
+      });
     return true;
   }
 
@@ -335,23 +368,53 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
   }
 
   if (msg.type === 'SAVE_PRINT_PREFERENCE') {
-    backendFetch('PUT', `/api/v1/users/${encodeURIComponent(msg.userId)}/print-preferences`, msg.preference)
-      .then((data) => sendResponse({ ok: true, data }))
-      .catch((err) => sendResponse({ ok: false, error: err.message }));
+    (async () => {
+      try {
+        const userId = msg.userId || await getCurrentUserId();
+        if (!userId) {
+          sendResponse({ ok: false, error: 'Usuario nao identificado' });
+          return;
+        }
+        const data = await backendFetch('PUT', `/api/v1/users/${encodeURIComponent(userId)}/print-preferences`, msg.preference);
+        sendResponse({ ok: true, data });
+      } catch (err) {
+        sendResponse({ ok: false, error: err.message });
+      }
+    })();
     return true;
   }
 
   if (msg.type === 'SAVE_FEDEX_SETTINGS') {
-    backendFetch('PUT', `/api/v1/users/${encodeURIComponent(msg.userId)}/fedex-settings`, msg.settings)
-      .then((data) => sendResponse({ ok: true, data }))
-      .catch((err) => sendResponse({ ok: false, error: err.message }));
+    (async () => {
+      try {
+        const userId = msg.userId || await getCurrentUserId();
+        if (!userId) {
+          sendResponse({ ok: false, error: 'Usuario nao identificado' });
+          return;
+        }
+        const data = await backendFetch('PUT', `/api/v1/users/${encodeURIComponent(userId)}/fedex-settings`, msg.settings);
+        sendResponse({ ok: true, data });
+      } catch (err) {
+        sendResponse({ ok: false, error: err.message });
+      }
+    })();
     return true;
   }
 
   if (msg.type === 'SELECT_FEDEX_ACCOUNT') {
-    backendFetch('PUT', `/api/v1/users/${encodeURIComponent(msg.userId)}/fedex-settings/select`, { accountNumber: msg.accountNumber })
-      .then((data) => sendResponse({ ok: true, data }))
-      .catch((err) => sendResponse({ ok: false, error: err.message }));
+    (async () => {
+      try {
+        const userId = msg.userId || await getCurrentUserId();
+        if (!userId) {
+          sendResponse({ ok: false, error: 'Usuario nao identificado' });
+          return;
+        }
+        const data = await backendFetch('PUT', `/api/v1/users/${encodeURIComponent(userId)}/fedex-settings/select`, { accountNumber: msg.accountNumber });
+        sendResponse({ ok: true, data });
+      } catch (err) {
+        sendResponse({ ok: false, error: err.message });
+      }
+    })();
     return true;
   }
 
@@ -363,20 +426,37 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
   }
 
   if (msg.type === 'FETCH_DRAFTS') {
+    console.log(`📥 [background.js] FETCH_DRAFTS`);
     backendFetch('GET', '/api/v1/drafts')
-      .then((data) => sendResponse({ ok: true, data }))
-      .catch((err) => sendResponse({ ok: false, error: err.message }));
+      .then((data) => {
+        console.log(`✅ [background.js] FETCH_DRAFTS sucesso, respondendo`);
+        sendResponse({ ok: true, data });
+      })
+      .catch((err) => {
+        console.error(`❌ [background.js] FETCH_DRAFTS erro:`, err.message);
+        sendResponse({ ok: false, error: err.message });
+      });
     return true;
   }
 
   if (msg.type === 'CANCEL_SHIPMENT') {
-    backendFetch('PUT', '/api/v1/fedex/shipments/cancel', {
-      userId: msg.userId,
-      accountNumber: msg.accountNumber,
-      trackingNumber: msg.trackingNumber
-    })
-      .then((data) => sendResponse({ ok: true, data }))
-      .catch((err) => sendResponse({ ok: false, error: err.message }));
+    (async () => {
+      try {
+        const userId = msg.userId || await getCurrentUserId();
+        if (!userId) {
+          sendResponse({ ok: false, error: 'Usuario nao identificado' });
+          return;
+        }
+        const data = await backendFetch('PUT', '/api/v1/fedex/shipments/cancel', {
+          userId,
+          accountNumber: msg.accountNumber,
+          trackingNumber: msg.trackingNumber
+        });
+        sendResponse({ ok: true, data });
+      } catch (err) {
+        sendResponse({ ok: false, error: err.message });
+      }
+    })();
     return true;
   }
 
