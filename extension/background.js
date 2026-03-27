@@ -374,9 +374,35 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
   }
 
   if (msg.type === 'FETCH_FEDEX_SETTINGS') {
-    backendFetch('GET', `/api/v1/users/${encodeURIComponent(msg.userId)}/fedex-settings`)
-      .then((data) => safeResponse(sendResponse, { ok: true, data }))
-      .catch((err) => safeResponse(sendResponse, { ok: false, error: err.message }));
+    (async () => {
+      try {
+        console.log(`📥 [FETCH_FEDEX_SETTINGS] Handler iniciado`);
+        console.log(`📥 [FETCH_FEDEX_SETTINGS] msg.userId: ${msg.userId}`);
+        
+        if (!msg.userId) {
+          console.error(`❌ [FETCH_FEDEX_SETTINGS] userId não informado`);
+          safeResponse(sendResponse, { ok: false, error: 'userId nao informado' });
+          return;
+        }
+        
+        const endpoint = `/api/v1/users/${encodeURIComponent(msg.userId)}/fedex-settings`;
+        console.log(`📥 [FETCH_FEDEX_SETTINGS] Endpoint: ${endpoint}`);
+        console.log(`📥 [FETCH_FEDEX_SETTINGS] Executando GET...`);
+        
+        const data = await backendFetch('GET', endpoint);
+        
+        console.log(`✅ [FETCH_FEDEX_SETTINGS] Dados carregados:`, {
+          configured: data?.configured,
+          accountsCount: data?.accounts?.length,
+          selectedAccountNumber: data?.selectedAccountNumber
+        });
+        
+        safeResponse(sendResponse, { ok: true, data });
+      } catch (err) {
+        console.error(`❌ [FETCH_FEDEX_SETTINGS] Erro ao carregar:`, err.message);
+        safeResponse(sendResponse, { ok: false, error: err.message });
+      }
+    })();
     return true;
   }
 
@@ -400,14 +426,34 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
   if (msg.type === 'SAVE_FEDEX_SETTINGS') {
     (async () => {
       try {
+        console.log(`💾 [SAVE_FEDEX_SETTINGS] Handler iniciado`);
+        console.log(`💾 [SAVE_FEDEX_SETTINGS] msg.userId: ${msg.userId}, msg.settings:`, msg.settings);
+        
         const userId = msg.userId || await getCurrentUserId();
+        console.log(`💾 [SAVE_FEDEX_SETTINGS] userId resolvido: ${userId}`);
+        
         if (!userId) {
+          console.error(`❌ [SAVE_FEDEX_SETTINGS] Usuario nao identificado`);
           safeResponse(sendResponse, { ok: false, error: 'Usuario nao identificado' });
           return;
         }
-        const data = await backendFetch('PUT', `/api/v1/users/${encodeURIComponent(userId)}/fedex-settings`, msg.settings);
+        
+        if (!msg.settings || typeof msg.settings !== 'object') {
+          console.error(`❌ [SAVE_FEDEX_SETTINGS] Configurações inválidas:`, msg.settings);
+          safeResponse(sendResponse, { ok: false, error: 'Configurações inválidas' });
+          return;
+        }
+        
+        const endpoint = `/api/v1/users/${encodeURIComponent(userId)}/fedex-settings`;
+        console.log(`💾 [SAVE_FEDEX_SETTINGS] Endpoint: ${endpoint}`);
+        console.log(`💾 [SAVE_FEDEX_SETTINGS] Enviando para backend...`);
+        
+        const data = await backendFetch('PUT', endpoint, msg.settings);
+        
+        console.log(`✅ [SAVE_FEDEX_SETTINGS] Configurações salvas no backend:`, data);
         safeResponse(sendResponse, { ok: true, data });
       } catch (err) {
+        console.error(`❌ [SAVE_FEDEX_SETTINGS] Erro ao salvar:`, err.message);
         safeResponse(sendResponse, { ok: false, error: err.message });
       }
     })();
@@ -417,14 +463,189 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
   if (msg.type === 'SELECT_FEDEX_ACCOUNT') {
     (async () => {
       try {
+        console.log(`⚙️ [SELECT_FEDEX_ACCOUNT] Handler iniciado`);
+        console.log(`⚙️ [SELECT_FEDEX_ACCOUNT] msg.userId: ${msg.userId}, accountNumber: ${msg.accountNumber}`);
+        
         const userId = msg.userId || await getCurrentUserId();
+        console.log(`⚙️ [SELECT_FEDEX_ACCOUNT] userId resolvido: ${userId}`);
+        
         if (!userId) {
+          console.error(`❌ [SELECT_FEDEX_ACCOUNT] Usuario nao identificado`);
           safeResponse(sendResponse, { ok: false, error: 'Usuario nao identificado' });
           return;
         }
-        const data = await backendFetch('PUT', `/api/v1/users/${encodeURIComponent(userId)}/fedex-settings/select`, { accountNumber: msg.accountNumber });
+        
+        if (!msg.accountNumber) {
+          console.error(`❌ [SELECT_FEDEX_ACCOUNT] accountNumber não informado`);
+          safeResponse(sendResponse, { ok: false, error: 'accountNumber nao informado' });
+          return;
+        }
+        
+        const endpoint = `/api/v1/users/${encodeURIComponent(userId)}/fedex-settings/select`;
+        const payload = { accountNumber: msg.accountNumber };
+        console.log(`⚙️ [SELECT_FEDEX_ACCOUNT] Endpoint: ${endpoint}, payload:`, payload);
+        console.log(`⚙️ [SELECT_FEDEX_ACCOUNT] Enviando para backend...`);
+        
+        const data = await backendFetch('PUT', endpoint, payload);
+        
+        console.log(`✅ [SELECT_FEDEX_ACCOUNT] Conta selecionada no backend:`, data);
         safeResponse(sendResponse, { ok: true, data });
       } catch (err) {
+        console.error(`❌ [SELECT_FEDEX_ACCOUNT] Erro ao selecionar:`, err.message);
+        safeResponse(sendResponse, { ok: false, error: err.message });
+      }
+    })();
+    return true;
+  }
+
+  if (msg.type === 'SAVE_FEDEX_ACCOUNT') {
+    (async () => {
+      try {
+        console.log('💾 [SAVE_FEDEX_ACCOUNT] Handler iniciado');
+        
+        const { userId, accountData } = msg;
+        
+        if (!userId || !accountData) {
+          console.error('❌ [SAVE_FEDEX_ACCOUNT] Dados incompletos');
+          safeResponse(sendResponse, { ok: false, error: 'Dados incompletos' });
+          return;
+        }
+        
+        console.log('💾 [SAVE_FEDEX_ACCOUNT] userId:', userId);
+        console.log('📤 [SAVE_FEDEX_ACCOUNT] Payload:', JSON.stringify(accountData));
+        
+        const endpoint = `/api/v1/users/${encodeURIComponent(userId)}/fedex-accounts`;
+        console.log('📥 [SAVE_FEDEX_ACCOUNT] Endpoint: POST ' + endpoint);
+        
+        const response = await backendFetch('POST', endpoint, accountData);
+        
+        console.log('✅ [SAVE_FEDEX_ACCOUNT] Nova conta criada:', {
+          accountNumber: response.accountNumber,
+          nickname: response.nickname,
+          accountType: response.accountType
+        });
+        
+        safeResponse(sendResponse, { 
+          ok: true, 
+          data: response,
+          message: 'Conta registrada com sucesso'
+        });
+      } catch (err) {
+        console.error('❌ [SAVE_FEDEX_ACCOUNT] Erro ao salvar:', err.message);
+        safeResponse(sendResponse, { ok: false, error: err.message });
+      }
+    })();
+    return true;
+  } else if (msg.type === 'DELETE_FEDEX_ACCOUNT') {
+    (async () => {
+      try {
+        console.log('🗑️ [DELETE_FEDEX_ACCOUNT] Handler iniciado');
+        
+        const { userId, accountNumber } = msg;
+        
+        if (!userId || !accountNumber) {
+          console.error('🗑️ [DELETE_FEDEX_ACCOUNT] Dados incompletos');
+          safeResponse(sendResponse, { ok: false, error: 'Dados incompletos' });
+          return;
+        }
+        
+        console.log('🗑️ [DELETE_FEDEX_ACCOUNT] userId:', userId);
+        console.log('🗑️ [DELETE_FEDEX_ACCOUNT] accountNumber:', accountNumber);
+        
+        const endpoint = `/api/v1/users/${encodeURIComponent(userId)}/fedex-accounts/${encodeURIComponent(accountNumber)}`;
+        console.log('📥 [DELETE_FEDEX_ACCOUNT] Endpoint: DELETE ' + endpoint);
+        
+        const response = await backendFetch('DELETE', endpoint);
+        
+        console.log('✅ [DELETE_FEDEX_ACCOUNT] Conta deletada com sucesso:', {
+          accountNumber,
+          message: response.message
+        });
+        
+        safeResponse(sendResponse, { 
+          ok: true, 
+          data: response,
+          message: 'Conta deletada com sucesso'
+        });
+      } catch (err) {
+        console.error('❌ [DELETE_FEDEX_ACCOUNT] Erro ao deletar:', err.message);
+        safeResponse(sendResponse, { ok: false, error: err.message });
+      }
+    })();
+    return true;
+  } else if (msg.type === 'FETCH_ACCOUNT_PREFERENCES') {
+    (async () => {
+      try {
+        console.log('📋 [FETCH_ACCOUNT_PREFERENCES] Handler iniciado');
+        
+        const { userId, accountNumber } = msg;
+        
+        if (!userId || !accountNumber) {
+          console.error('❌ [FETCH_ACCOUNT_PREFERENCES] Dados incompletos');
+          safeResponse(sendResponse, { ok: false, error: 'Dados incompletos' });
+          return;
+        }
+        
+        console.log('📋 [FETCH_ACCOUNT_PREFERENCES] userId:', userId);
+        console.log('📋 [FETCH_ACCOUNT_PREFERENCES] accountNumber:', accountNumber);
+        
+        const endpoint = `/api/v1/users/${encodeURIComponent(userId)}/fedex-accounts/${encodeURIComponent(accountNumber)}/preferences`;
+        console.log('📥 [FETCH_ACCOUNT_PREFERENCES] Endpoint: GET ' + endpoint);
+        
+        const data = await backendFetch('GET', endpoint);
+        
+        console.log('✅ [FETCH_ACCOUNT_PREFERENCES] Preferências carregadas:', {
+          printMode: data.printMode,
+          defaultLabel: data.defaultLabel,
+          autoRetry: data.autoRetry
+        });
+        
+        safeResponse(sendResponse, { 
+          ok: true, 
+          data: data
+        });
+      } catch (err) {
+        console.error('❌ [FETCH_ACCOUNT_PREFERENCES] Erro ao carregar:', err.message);
+        safeResponse(sendResponse, { ok: false, error: err.message });
+      }
+    })();
+    return true;
+  } else if (msg.type === 'FETCH_CANCELABLE_SHIPMENTS') {
+    (async () => {
+      try {
+        console.log('📦 [FETCH_CANCELABLE_SHIPMENTS] Handler iniciado');
+        
+        const { userId, accountNumber } = msg;
+        
+        if (!userId) {
+          console.error('❌ [FETCH_CANCELABLE_SHIPMENTS] UserId não informado');
+          safeResponse(sendResponse, { ok: false, error: 'UserId não informado' });
+          return;
+        }
+        
+        console.log('📦 [FETCH_CANCELABLE_SHIPMENTS] userId:', userId);
+        if (accountNumber) {
+          console.log('📦 [FETCH_CANCELABLE_SHIPMENTS] accountNumber:', accountNumber);
+        }
+        
+        const endpoint = accountNumber 
+          ? `/api/v1/users/${encodeURIComponent(userId)}/shipments?accountNumber=${encodeURIComponent(accountNumber)}&cancelable=true`
+          : `/api/v1/users/${encodeURIComponent(userId)}/shipments?cancelable=true`;
+        
+        console.log('📥 [FETCH_CANCELABLE_SHIPMENTS] Endpoint: GET ' + endpoint);
+        
+        const data = await backendFetch('GET', endpoint);
+        
+        console.log('✅ [FETCH_CANCELABLE_SHIPMENTS] Shipments carregados:', {
+          count: data?.shipments?.length || 0
+        });
+        
+        safeResponse(sendResponse, { 
+          ok: true, 
+          data: data
+        });
+      } catch (err) {
+        console.error('❌ [FETCH_CANCELABLE_SHIPMENTS] Erro ao carregar:', err.message);
         safeResponse(sendResponse, { ok: false, error: err.message });
       }
     })();
@@ -432,9 +653,30 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
   }
 
   if (msg.type === 'DELETE_FEDEX_SETTINGS') {
-    backendFetch('DELETE', `/api/v1/users/${encodeURIComponent(msg.userId)}/fedex-settings/${encodeURIComponent(msg.accountNumber)}`)
-      .then((data) => safeResponse(sendResponse, { ok: true, data }))
-      .catch((err) => safeResponse(sendResponse, { ok: false, error: err.message }));
+    (async () => {
+      try {
+        console.log(`🗑️ [DELETE_FEDEX_SETTINGS] Handler iniciado`);
+        console.log(`🗑️ [DELETE_FEDEX_SETTINGS] msg.userId: ${msg.userId}, accountNumber: ${msg.accountNumber}`);
+        
+        if (!msg.userId || !msg.accountNumber) {
+          console.error(`❌ [DELETE_FEDEX_SETTINGS] Parâmetros inválidos`);
+          safeResponse(sendResponse, { ok: false, error: 'userId ou accountNumber nao informado' });
+          return;
+        }
+        
+        const endpoint = `/api/v1/users/${encodeURIComponent(msg.userId)}/fedex-settings/${encodeURIComponent(msg.accountNumber)}`;
+        console.log(`🗑️ [DELETE_FEDEX_SETTINGS] Endpoint: ${endpoint}`);
+        console.log(`🗑️ [DELETE_FEDEX_SETTINGS] Enviando para backend...`);
+        
+        const data = await backendFetch('DELETE', endpoint);
+        
+        console.log(`✅ [DELETE_FEDEX_SETTINGS] Conta deletada no backend:`, data);
+        safeResponse(sendResponse, { ok: true, data });
+      } catch (err) {
+        console.error(`❌ [DELETE_FEDEX_SETTINGS] Erro ao deletar:`, err.message);
+        safeResponse(sendResponse, { ok: false, error: err.message });
+      }
+    })();
     return true;
   }
 

@@ -796,6 +796,42 @@
     }
   }
 
+  async function loadAccountPreferences(accountNumber) {
+    const userId = getCurrentUserId();
+    
+    if (!userId || !accountNumber) {
+      console.warn('📋 [loadAccountPreferences] Dados incompletos:', { userId, accountNumber });
+      return;
+    }
+
+    try {
+      console.log('📋 [loadAccountPreferences] Carregando preferências da conta:', accountNumber);
+      
+      const response = await sendMessageToBackground({
+        type: 'FETCH_ACCOUNT_PREFERENCES',
+        userId,
+        accountNumber
+      });
+      
+      if (!response || !response.ok) {
+        console.warn('⚠️ [loadAccountPreferences] Falha ao carregar:', response?.error);
+        return;
+      }
+      
+      console.log('✅ [loadAccountPreferences] Preferências carregadas:', response.data);
+      
+      // Armazenar preferências no estado da conta específica
+      if (uiState.fedexSettings.selectedAccount) {
+        uiState.fedexSettings.selectedAccount.preferences = response.data;
+      }
+      
+      return response.data;
+    } catch (error) {
+      console.error('❌ [loadAccountPreferences] Erro:', error);
+      return null;
+    }
+  }
+
   function readFedexSettingsForm() {
     return {
       apiKey: document.getElementById('fedexApiKey')?.value?.trim() || '',
@@ -942,6 +978,36 @@
     if (inlineMessage && !inlineMessage.dataset.locked) {
       inlineMessage.textContent = '';
       inlineMessage.style.display = 'none';
+    }
+
+    // 📋 Seção de seleção de drafts (Fase 3)
+    initializeDraftSelection();
+    const draftSection = createDraftSelectionSection();
+    if (draftSection) {
+      const body = document.querySelector('body');
+      if (body) {
+        body.appendChild(draftSection);
+        console.log('✅ [populateFedexSettingsForm] Seção de drafts injetada');
+      }
+    }
+
+    // 📦 Seção de tracking/cancelamento (Fase 4)
+    const trackingSection = createTrackingListSection();
+    if (trackingSection) {
+      const body = document.querySelector('body');
+      if (body) {
+        body.appendChild(trackingSection);
+        console.log('✅ [populateFedexSettingsForm] Seção de tracking injetada');
+        // Carregar a lista de envios
+        loadTrackingList();
+      }
+    }
+
+    // ⚙️ Seção de utilidades (Fase 5)
+    const utilitiesSection = createUtilitiesSection();
+    if (utilitiesSection) {
+      body.appendChild(utilitiesSection);
+      console.log('✅ [populateFedexSettingsForm] Seção de utilidades injetada');
     }
 
     populateCancellationOptions();
@@ -1135,6 +1201,1040 @@
       return response.data;
     } catch (error) {
       throw error;
+    }
+  }
+
+  // ✅ Inicializar estado de seleção de drafts
+  function initializeDraftSelection() {
+    try {
+      console.log('✅ [initializeDraftSelection] Inicializando seleção de drafts');
+      
+      if (!uiState.selectedDrafts) {
+        uiState.selectedDrafts = [];
+      }
+      
+      console.log('✅ [initializeDraftSelection] Estado inicializado:', {
+        selectedCount: uiState.selectedDrafts.length
+      });
+    } catch (error) {
+      console.error('❌ [initializeDraftSelection] Erro:', error);
+    }
+  }
+
+  // 📝 Criar seção de seleção de drafts
+  function createDraftSelectionSection() {
+    try {
+      console.log('📝 [createDraftSelectionSection] Criando seção de seleção de drafts');
+      
+      const sectionDiv = document.createElement('div');
+      sectionDiv.id = 'fedexDraftSelection';
+      sectionDiv.style.cssText = `
+        padding: 12px !important;
+        background: #f9f9f9 !important;
+        border-radius: 6px !important;
+        margin: 12px 0 !important;
+        border-left: 4px solid #28a745 !important;
+      `;
+      
+      const title = document.createElement('h4');
+      title.textContent = '📋 Selecionar Rascunhos para Envio';
+      title.style.cssText = `
+        margin: 0 0 10px 0 !important;
+        font-size: 12px !important;
+        font-weight: bold !important;
+        color: #28a745 !important;
+      `;
+      sectionDiv.appendChild(title);
+      
+      const draftsList = document.createElement('div');
+      draftsList.id = 'fedexDraftsList';
+      draftsList.style.cssText = `
+        max-height: 200px !important;
+        overflow-y: auto !important;
+        border: 1px solid #ddd !important;
+        border-radius: 4px !important;
+        padding: 8px !important;
+        background: white !important;
+      `;
+      
+      // Preencher com drafts existentes
+      if (window.drafts && Array.isArray(window.drafts)) {
+        if (window.drafts.length === 0) {
+          const noMsg = document.createElement('p');
+          noMsg.textContent = '📭 Nenhum rascunho disponível';
+          noMsg.style.cssText = 'color: #999 !important; margin: 0 !important; font-size: 11px !important;';
+          draftsList.appendChild(noMsg);
+        } else {
+          window.drafts.forEach((draft, index) => {
+            const draftItem = document.createElement('label');
+            draftItem.style.cssText = `
+              display: flex !important;
+              align-items: center !important;
+              padding: 6px 4px !important;
+              cursor: pointer !important;
+              border-radius: 3px !important;
+              transition: background 0.2s !important;
+            `;
+            draftItem.onmouseover = () => { draftItem.style.background = '#f0f0f0 !important'; };
+            draftItem.onmouseout = () => { draftItem.style.background = 'transparent !important'; };
+            
+            const checkbox = document.createElement('input');
+            checkbox.type = 'checkbox';
+            checkbox.className = 'fedexDraftCheckbox';
+            checkbox.dataset.draftId = draft.id || index;
+            checkbox.dataset.draftIndex = index;
+            checkbox.style.cssText = 'margin-right: 8px !important; cursor: pointer !important;';
+            
+            checkbox.addEventListener('change', (e) => {
+              handleDraftCheckboxChange(e, draft);
+            });
+            
+            const labelText = document.createElement('span');
+            labelText.style.cssText = 'font-size: 11px !important; flex: 1 !important;';
+            labelText.textContent = `📦 ${draft.name || 'Rascunho ' + (index + 1)}`;
+            
+            draftItem.appendChild(checkbox);
+            draftItem.appendChild(labelText);
+            draftsList.appendChild(draftItem);
+          });
+        }
+      } else {
+        const noMsg = document.createElement('p');
+        noMsg.textContent = '📭 Nenhum rascunho disponível';
+        noMsg.style.cssText = 'color: #999 !important; margin: 0 !important; font-size: 11px !important;';
+        draftsList.appendChild(noMsg);
+      }
+      
+      sectionDiv.appendChild(draftsList);
+      
+      // Contador de seleção
+      const counterDiv = document.createElement('div');
+      counterDiv.id = 'fedexDraftCounter';
+      counterDiv.style.cssText = `
+        margin-top: 8px !important;
+        font-size: 11px !important;
+        color: #666 !important;
+        text-align: right !important;
+      `;
+      counterDiv.textContent = '0️⃣ Nenhum selecionado';
+      sectionDiv.appendChild(counterDiv);
+      
+      // Botão de envio
+      const sendDiv = document.createElement('div');
+      sendDiv.style.cssText = 'margin-top: 10px !important; display: flex !important; gap: 8px !important;';
+      
+      const sendBtn = document.createElement('button');
+      sendBtn.id = 'fedexSendDraftsBtn';
+      sendBtn.textContent = '🚀 Enviar Selecionados';
+      sendBtn.style.cssText = `
+        flex: 1 !important;
+        padding: 8px !important;
+        font-size: 11px !important;
+        font-weight: bold !important;
+        background: #28a745 !important;
+        color: white !important;
+        border: none !important;
+        border-radius: 4px !important;
+        cursor: pointer !important;
+      `;
+      sendBtn.disabled = true;
+      sendBtn.style.opacity = '0.5';
+      sendBtn.addEventListener('click', handleSendSelectedDrafts);
+      sendBtn.onmouseover = function() {
+        if (!this.disabled) this.style.background = '#218838 !important';
+      };
+      sendBtn.onmouseout = function() {
+        if (!this.disabled) this.style.background = '#28a745 !important';
+      };
+      
+      const clearBtn = document.createElement('button');
+      clearBtn.id = 'fedexClearDraftsBtn';
+      clearBtn.textContent = '🔄 Limpar';
+      clearBtn.style.cssText = `
+        padding: 8px 12px !important;
+        font-size: 11px !important;
+        font-weight: bold !important;
+        background: #6c757d !important;
+        color: white !important;
+        border: none !important;
+        border-radius: 4px !important;
+        cursor: pointer !important;
+      `;
+      clearBtn.addEventListener('click', handleClearDraftSelection);
+      clearBtn.onmouseover = function() {
+        this.style.background = '#5a6268 !important';
+      };
+      clearBtn.onmouseout = function() {
+        this.style.background = '#6c757d !important';
+      };
+      
+      sendDiv.appendChild(sendBtn);
+      sendDiv.appendChild(clearBtn);
+      sectionDiv.appendChild(sendDiv);
+      
+      console.log('✅ [createDraftSelectionSection] Seção criada com sucesso');
+      
+      return sectionDiv;
+    } catch (error) {
+      console.error('❌ [createDraftSelectionSection] Erro ao criar seção:', error);
+      return null;
+    }
+  }
+
+  // ☑️ Handler para mudança de checkbox
+  function handleDraftCheckboxChange(event, draft) {
+    try {
+      const checkbox = event.target;
+      const draftId = checkbox.dataset.draftId;
+      const isChecked = checkbox.checked;
+      
+      console.log('☑️ [handleDraftCheckboxChange] Draft ' + (isChecked ? 'selecionado' : 'deseleccionado') + ':', draftId);
+      
+      if (isChecked) {
+        if (!uiState.selectedDrafts.includes(draftId)) {
+          uiState.selectedDrafts.push(draftId);
+        }
+      } else {
+        uiState.selectedDrafts = uiState.selectedDrafts.filter(id => id !== draftId);
+      }
+      
+      updateDraftSelectionUI();
+    } catch (error) {
+      console.error('❌ [handleDraftCheckboxChange] Erro:', error);
+    }
+  }
+
+  // 🔄 Atualizar UI de seleção de drafts
+  function updateDraftSelectionUI() {
+    try {
+      const count = uiState.selectedDrafts?.length || 0;
+      const counter = document.getElementById('fedexDraftCounter');
+      
+      if (counter) {
+        if (count === 0) {
+          counter.textContent = '0️⃣ Nenhum selecionado';
+        } else if (count === 1) {
+          counter.textContent = '1️⃣ 1 rascunho selecionado';
+        } else {
+          counter.textContent = `📦 ${count} rascunhos selecionados`;
+        }
+      }
+      
+      const sendBtn = document.getElementById('fedexSendDraftsBtn');
+      if (sendBtn) {
+        sendBtn.disabled = count === 0;
+        sendBtn.style.opacity = count === 0 ? '0.5' : '1';
+      }
+      
+      console.log('🔄 [updateDraftSelectionUI] UI atualizada:', { count });
+    } catch (error) {
+      console.error('❌ [updateDraftSelectionUI] Erro:', error);
+    }
+  }
+
+  // 🔄 Limpar seleção de drafts
+  function handleClearDraftSelection() {
+    try {
+      console.log('🔄 [handleClearDraftSelection] Limpando seleção');
+      
+      uiState.selectedDrafts = [];
+      
+      // Desmarcar todos os checkboxes
+      const checkboxes = document.querySelectorAll('.fedexDraftCheckbox');
+      checkboxes.forEach(checkbox => {
+        checkbox.checked = false;
+      });
+      
+      updateDraftSelectionUI();
+      showInlineMessage('Seleção limpa', 'info');
+      
+      console.log('✅ [handleClearDraftSelection] Seleção limpa');
+    } catch (error) {
+      console.error('❌ [handleClearDraftSelection] Erro:', error);
+    }
+  }
+
+  // ✔️ Validar seleção de drafts antes de enviar
+  function validateDraftSelection() {
+    try {
+      console.log('✔️ [validateDraftSelection] Validando seleção');
+      
+      const errors = [];
+      
+      if (!uiState.selectedDrafts || uiState.selectedDrafts.length === 0) {
+        errors.push('📭 Nenhum rascunho selecionado');
+      }
+      
+      if (!uiState.currentUserId) {
+        errors.push('👤 Usuário não identificado');
+      }
+      
+      if (!uiState.fedexSettings?.selectedAccountNumber) {
+        errors.push('🏢 Nenhuma conta FedEx selecionada');
+      }
+      
+      if (!window.drafts || window.drafts.length === 0) {
+        errors.push('📋 Nenhum rascunho disponível no sistema');
+      }
+      
+      const isValid = errors.length === 0;
+      
+      console.log('✔️ [validateDraftSelection] Resultado:', {
+        isValid,
+        errorsCount: errors.length,
+        selectedCount: uiState.selectedDrafts?.length || 0
+      });
+      
+      return { isValid, errors };
+    } catch (error) {
+      console.error('❌ [validateDraftSelection] Erro:', error);
+      return { isValid: false, errors: ['Erro ao validar seleção'] };
+    }
+  }
+
+  // 📦 Converter drafts selecionados para PSDU
+  function parseDraftsForPsdu(draftIds) {
+    try {
+      console.log('📦 [parseDraftsForPsdu] Convertendo drafts para PSDU:', draftIds);
+      
+      if (!window.drafts || !Array.isArray(window.drafts)) {
+        console.error('❌ [parseDraftsForPsdu] Drafts não disponíveis');
+        return [];
+      }
+      
+      const psduData = draftIds.map((draftId, index) => {
+        const draft = window.drafts.find(d => d.id === draftId || String(window.drafts.indexOf(d)) === String(draftId));
+        
+        if (!draft) {
+          console.warn('⚠️ [parseDraftsForPsdu] Draft não encontrado:', draftId);
+          return null;
+        }
+        
+        return {
+          index: index,
+          draftId: draft.id || draftId,
+          shipmentInfo: draft.shipmentInfo || {},
+          recipient: draft.recipient || {},
+          packages: Array.isArray(draft.packages) ? draft.packages : [],
+          notes: draft.notes || '',
+          selectedService: draft.selectedService || 'STANDARD_OVERNIGHT'
+        };
+      }).filter(item => item !== null);
+      
+      console.log('✅ [parseDraftsForPsdu] Conversão completa:', {
+        inputCount: draftIds.length,
+        outputCount: psduData.length
+      });
+      
+      return psduData;
+    } catch (error) {
+      console.error('❌ [parseDraftsForPsdu] Erro ao converter drafts:', error);
+      return [];
+    }
+  }
+
+  // 🚀 Handler para enviar drafts selecionados
+  async function handleSendSelectedDrafts() {
+    try {
+      console.log('🚀 [handleSendSelectedDrafts] Iniciando envio de drafts selecionados');
+      
+      // Validar seleção
+      const validation = validateDraftSelection();
+      if (!validation.isValid) {
+        console.warn('⚠️ [handleSendSelectedDrafts] Validação falhou:', validation.errors);
+        validation.errors.forEach(error => {
+          showInlineMessage(error, 'warning');
+        });
+        return;
+      }
+      
+      // Converter para PSDU
+      const psduPayload = parseDraftsForPsdu(uiState.selectedDrafts);
+      if (psduPayload.length === 0) {
+        showInlineMessage('❌ Erro ao processar rascunhos', 'error');
+        return;
+      }
+      
+      console.log('📤 [handleSendSelectedDrafts] Payload preparado:', {
+        count: psduPayload.length,
+        userId: uiState.currentUserId,
+        accountNumber: uiState.fedexSettings?.selectedAccountNumber
+      });
+      
+      // Desabilitar botão durante envio
+      const sendBtn = document.getElementById('fedexSendDraftsBtn');
+      if (sendBtn) {
+        sendBtn.disabled = true;
+        sendBtn.style.opacity = '0.5';
+        sendBtn.textContent = '⏳ Enviando...';
+      }
+      
+      showInlineMessage('⏳ Enviando rascunhos para FedEx...', 'info');
+      
+      // Enviar para backend
+      const results = await Promise.all(
+        psduPayload.map(psdu => {
+          return new Promise(async (resolve) => {
+            try {
+              const response = await sendMessageToBackground({
+                type: 'SEND_DRAFT_TO_FEDEX',
+                userId: uiState.currentUserId,
+                accountNumber: uiState.fedexSettings?.selectedAccountNumber,
+                psduData: psdu
+              });
+              
+              if (response && response.ok) {
+                console.log('✅ [handleSendSelectedDrafts] Draft enviado:', {
+                  index: psdu.index,
+                  trackingNumber: response.data?.trackingNumber
+                });
+                resolve({ success: true, data: response.data });
+              } else {
+                console.error('❌ [handleSendSelectedDrafts] Erro no envio:', response?.error);
+                resolve({ success: false, error: response?.error });
+              }
+            } catch (error) {
+              console.error('❌ [handleSendSelectedDrafts] Erro:', error.message);
+              resolve({ success: false, error: error.message });
+            }
+          });
+        })
+      );
+      
+      // Processar resultados
+      const successCount = results.filter(r => r.success).length;
+      const failureCount = results.filter(r => !r.success).length;
+      
+      console.log('📊 [handleSendSelectedDrafts] Resumo do envio:', {
+        total: results.length,
+        sucesso: successCount,
+        erro: failureCount
+      });
+      
+      // Limpar seleção
+      handleClearDraftSelection();
+      
+      // Exibir resultados
+      if (successCount > 0 && failureCount === 0) {
+        showInlineMessage(`✅ Sucesso! ${successCount} rascunho(s) enviado(s) para FedEx`, 'success');
+        displayPrintedLabels(results.filter(r => r.success).map(r => r.data));
+      } else if (successCount > 0 && failureCount > 0) {
+        showInlineMessage(`⚠️ ${successCount} enviado(s), ${failureCount} erro(s)`, 'warning');
+        displayPrintedLabels(results.filter(r => r.success).map(r => r.data));
+      } else {
+        showInlineMessage(`❌ Erro ao enviar rascunhos: ${failureCount} falha(s)`, 'error');
+      }
+    } catch (error) {
+      console.error('❌ [handleSendSelectedDrafts] Erro geral:', error);
+      showInlineMessage('❌ Erro ao enviar rascunhos: ' + error.message, 'error');
+    } finally {
+      const sendBtn = document.getElementById('fedexSendDraftsBtn');
+      if (sendBtn) {
+        sendBtn.disabled = true;
+        sendBtn.style.opacity = '0.5';
+        sendBtn.textContent = '🚀 Enviar Selecionados';
+      }
+    }
+  }
+
+  // 🏷️ Exibir labels impressos
+  function displayPrintedLabels(shipmentResults) {
+    try {
+      console.log('🏷️ [displayPrintedLabels] Exibindo labels para', shipmentResults.length, 'envios');
+      
+      // Procurar seção existente
+      let labelsSection = document.getElementById('fedexPrintedLabels');
+      if (labelsSection) {
+        labelsSection.remove();
+      }
+      
+      const container = document.createElement('div');
+      container.id = 'fedexPrintedLabels';
+      container.style.cssText = `
+        padding: 12px !important;
+        background: #d4edda !important;
+        border-radius: 6px !important;
+        margin: 12px 0 !important;
+        border-left: 4px solid #28a745 !important;
+      `;
+      
+      const title = document.createElement('h4');
+      title.textContent = '✅ Labels Gerados com Sucesso';
+      title.style.cssText = `
+        margin: 0 0 10px 0 !important;
+        font-size: 12px !important;
+        font-weight: bold !important;
+        color: #155724 !important;
+      `;
+      container.appendChild(title);
+      
+      const labelsList = document.createElement('div');
+      labelsList.style.cssText = 'font-size: 11px !important; color: #155724 !important;';
+      
+      shipmentResults.forEach((result, index) => {
+        const labelItem = document.createElement('div');
+        labelItem.style.cssText = 'padding: 4px 0 !important; border-bottom: 1px solid #c3e6cb !important;';
+        
+        const trackingNum = result?.trackingNumber || result?.id || `Envio ${index + 1}`;
+        const status = result?.status || 'Pendente';
+        
+        labelItem.innerHTML = `
+          📦 <strong>${trackingNum}</strong><br/>
+          Status: ${status}<br/>
+          Label: <a href="#" style="color: #007bff !important; text-decoration: underline !important;">Imprimir</a>
+        `;
+        
+        labelsList.appendChild(labelItem);
+      });
+      
+      container.appendChild(labelsList);
+      
+      // Botão para imprimir todos
+      const printAllBtn = document.createElement('button');
+      printAllBtn.textContent = '🖨️ Imprimir Todos';
+      printAllBtn.style.cssText = `
+        margin-top: 10px !important;
+        padding: 8px 12px !important;
+        font-size: 11px !important;
+        font-weight: bold !important;
+        background: #007bff !important;
+        color: white !important;
+        border: none !important;
+        border-radius: 4px !important;
+        cursor: pointer !important;
+        width: 100% !important;
+      `;
+      printAllBtn.addEventListener('click', () => {
+        console.log('🖨️ Iniciando impressão de todos os labels');
+        showInlineMessage('🖨️ Enviando para impressora...', 'info');
+      });
+      
+      container.appendChild(printAllBtn);
+      
+      const body = document.body;
+      if (body) {
+        body.appendChild(container);
+      }
+      
+      console.log('✅ [displayPrintedLabels] Labels exibidos com sucesso');
+    } catch (error) {
+      console.error('❌ [displayPrintedLabels] Erro:', error);
+    }
+  }
+
+  // 📦 Carregar lista de shipments/envios canceláveis
+  function loadTrackingList() {
+    try {
+      console.log('📦 [loadTrackingList] Carregando lista de envios');
+      
+      if (!uiState.currentUserId) {
+        console.warn('⚠️ [loadTrackingList] UserId não disponível');
+        return;
+      }
+      
+      sendMessageToBackground({
+        type: 'FETCH_CANCELABLE_SHIPMENTS',
+        userId: uiState.currentUserId,
+        accountNumber: uiState.fedexSettings?.selectedAccountNumber
+      }).then(response => {
+        if (response && response.ok) {
+          console.log('✅ [loadTrackingList] Shipments carregados:', {
+            count: response.data?.shipments?.length || 0
+          });
+          
+          uiState.cancelableShipments = response.data?.shipments || [];
+          displayTrackingList(uiState.cancelableShipments);
+        } else {
+          console.error('❌ [loadTrackingList] Erro ao carregar:', response?.error);
+          uiState.cancelableShipments = [];
+          displayTrackingList([]);
+          showInlineMessage('⚠️ Nenhum envio disponível para cancelamento', 'warning');
+        }
+      }).catch(error => {
+        console.error('❌ [loadTrackingList] Erro na requisição:', error);
+        uiState.cancelableShipments = [];
+        displayTrackingList([]);
+      });
+    } catch (error) {
+      console.error('❌ [loadTrackingList] Erro geral:', error);
+    }
+  }
+
+  // 📋 Criar seção de lista de envios
+  function createTrackingListSection() {
+    try {
+      console.log('📋 [createTrackingListSection] Criando seção de envios');
+      
+      const sectionDiv = document.createElement('div');
+      sectionDiv.id = 'fedexTrackingSection';
+      sectionDiv.style.cssText = `
+        padding: 12px !important;
+        background: #f9f9f9 !important;
+        border-radius: 6px !important;
+        margin: 12px 0 !important;
+        border-left: 4px solid #ff9800 !important;
+      `;
+      
+      const title = document.createElement('h4');
+      title.textContent = '📦 Envios Recentes';
+      title.style.cssText = `
+        margin: 0 0 10px 0 !important;
+        font-size: 12px !important;
+        font-weight: bold !important;
+        color: #ff9800 !important;
+      `;
+      sectionDiv.appendChild(title);
+      
+      const trackingsList = document.createElement('div');
+      trackingsList.id = 'fedexTrackingsList';
+      trackingsList.style.cssText = `
+        max-height: 250px !important;
+        overflow-y: auto !important;
+        border: 1px solid #ddd !important;
+        border-radius: 4px !important;
+        padding: 8px !important;
+        background: white !important;
+      `;
+      
+      sectionDiv.appendChild(trackingsList);
+      
+      console.log('✅ [createTrackingListSection] Seção criada');
+      
+      return sectionDiv;
+    } catch (error) {
+      console.error('❌ [createTrackingListSection] Erro:', error);
+      return null;
+    }
+  }
+
+  // 📋 Exibir lista de envios
+  function displayTrackingList(shipments) {
+    try {
+      console.log('📋 [displayTrackingList] Exibindo', shipments?.length || 0, 'envios');
+      
+      const trackingsList = document.getElementById('fedexTrackingsList');
+      if (!trackingsList) {
+        console.warn('⚠️ [displayTrackingList] Container não encontrado');
+        return;
+      }
+      
+      // Limpar lista anterior
+      trackingsList.innerHTML = '';
+      
+      if (!shipments || shipments.length === 0) {
+        const noMsg = document.createElement('p');
+        noMsg.textContent = '📭 Nenhum envio para cancelar no momento';
+        noMsg.style.cssText = 'color: #999 !important; margin: 0 !important; font-size: 11px !important; text-align: center !important;';
+        trackingsList.appendChild(noMsg);
+        return;
+      }
+      
+      shipments.forEach((shipment, index) => {
+        const shipmentDiv = document.createElement('div');
+        shipmentDiv.style.cssText = `
+          padding: 8px !important;
+          margin-bottom: 8px !important;
+          border: 1px solid #eee !important;
+          border-radius: 4px !important;
+          background: #fafafa !important;
+        `;
+        
+        // Info do envio
+        const infoDiv = document.createElement('div');
+        infoDiv.style.cssText = 'margin-bottom: 6px !important;';
+        
+        const trackingNum = shipment.trackingNumber || shipment.id;
+        const status = shipment.status || 'Pendente';
+        const createdAt = shipment.createdAt ? new Date(shipment.createdAt).toLocaleDateString('pt-BR') : 'N/A';
+        
+        infoDiv.innerHTML = `
+          <div style="font-weight: bold !important; font-size: 11px !important; color: #333 !important;">
+            🏷️ ${trackingNum}
+          </div>
+          <div style="font-size: 10px !important; color: #666 !important;">
+            Status: <span style="color: ${getStatusColor(status)} !important;">${status}</span> | Data: ${createdAt}
+          </div>
+        `;
+        shipmentDiv.appendChild(infoDiv);
+        
+        // Destino
+        if (shipment.recipient) {
+          const recipientDiv = document.createElement('div');
+          recipientDiv.style.cssText = 'font-size: 10px !important; color: #666 !important; margin-bottom: 6px !important;';
+          recipientDiv.textContent = `📍 ${shipment.recipient.name || 'N/A'} - ${shipment.recipient.city || ''}`;
+          shipmentDiv.appendChild(recipientDiv);
+        }
+        
+        // Botões de ação
+        const actionDiv = document.createElement('div');
+        actionDiv.style.cssText = 'display: flex !important; gap: 6px !important;';
+        
+        const detailsBtn = document.createElement('button');
+        detailsBtn.textContent = '👁️ Detalhes';
+        detailsBtn.style.cssText = `
+          flex: 1 !important;
+          padding: 4px 6px !important;
+          font-size: 9px !important;
+          background: #17a2b8 !important;
+          color: white !important;
+          border: none !important;
+          border-radius: 3px !important;
+          cursor: pointer !important;
+        `;
+        detailsBtn.addEventListener('click', () => {
+          console.log('👁️ Exibindo detalhes do shipment:', trackingNum);
+          showInlineMessage('📋 Detalhes: ' + trackingNum, 'info');
+        });
+        
+        const cancelBtn = document.createElement('button');
+        const isCancelable = status.toLowerCase() !== 'entregue' && status.toLowerCase() !== 'cancelado';
+        cancelBtn.textContent = '❌ Cancelar';
+        cancelBtn.style.cssText = `
+          flex: 1 !important;
+          padding: 4px 6px !important;
+          font-size: 9px !important;
+          background: ${isCancelable ? '#dc3545' : '#ccc'} !important;
+          color: white !important;
+          border: none !important;
+          border-radius: 3px !important;
+          cursor: ${isCancelable ? 'pointer' : 'not-allowed'} !important;
+          opacity: ${isCancelable ? '1' : '0.6'} !important;
+        `;
+        cancelBtn.disabled = !isCancelable;
+        cancelBtn.addEventListener('click', () => {
+          if (isCancelable) {
+            handleCancelShipment(trackingNum, shipment);
+          }
+        });
+        
+        actionDiv.appendChild(detailsBtn);
+        actionDiv.appendChild(cancelBtn);
+        shipmentDiv.appendChild(actionDiv);
+        
+        trackingsList.appendChild(shipmentDiv);
+      });
+      
+      console.log('✅ [displayTrackingList] Lista exibida com sucesso');
+    } catch (error) {
+      console.error('❌ [displayTrackingList] Erro ao exibir lista:', error);
+    }
+  }
+
+  // 🎨 Obter cor do status
+  function getStatusColor(status) {
+    const colors = {
+      'pendente': '#ffc107',
+      'em trânsito': '#17a2b8',
+      'entregue': '#28a745',
+      'cancelado': '#6c757d',
+      'erro': '#dc3545'
+    };
+    return colors[status?.toLowerCase()] || '#999';
+  }
+
+  // ❌ Handler para cancelar shipment
+  async function handleCancelShipment(trackingNumber, shipment) {
+    try {
+      console.log('❌ [handleCancelShipment] Iniciando cancelamento:', trackingNumber);
+      
+      if (!uiState.currentUserId) {
+        showInlineMessage('👤 Usuário não identificado', 'error');
+        return;
+      }
+      
+      if (!uiState.fedexSettings?.selectedAccountNumber) {
+        showInlineMessage('🏢 Nenhuma conta selecionada', 'error');
+        return;
+      }
+      
+      // Confirmação
+      const confirmed = confirm(
+        `⚠️ Tem certeza que deseja cancelar o envio ${trackingNumber}?\n\n` +
+        `Esta ação não pode ser desfeita.`
+      );
+      
+      if (!confirmed) {
+        console.log('⚠️ [handleCancelShipment] Cancelamento abortado pelo usuário');
+        return;
+      }
+      
+      showInlineMessage('⏳ Cancelando envio...', 'info');
+      
+      const response = await sendMessageToBackground({
+        type: 'CANCEL_SHIPMENT',
+        userId: uiState.currentUserId,
+        trackingNumber: trackingNumber,
+        accountNumber: uiState.fedexSettings?.selectedAccountNumber
+      });
+      
+      if (response && response.ok) {
+        console.log('✅ [handleCancelShipment] Envio cancelado com sucesso');
+        showInlineMessage(`✅ Envio ${trackingNumber} cancelado com sucesso!`, 'success');
+        
+        // Recarregar lista
+        loadTrackingList();
+      } else {
+        console.error('❌ [handleCancelShipment] Erro ao cancelar:', response?.error);
+        showInlineMessage('❌ Erro ao cancelar: ' + (response?.error || 'desconhecido'), 'error');
+      }
+    } catch (error) {
+      console.error('❌ [handleCancelShipment] Erro geral:', error);
+      showInlineMessage('❌ Erro ao cancelar envio: ' + error.message, 'error');
+    }
+  }
+
+  // 🔄 Atualizar lista de tracking
+  function updateTrackingList() {
+    try {
+      console.log('🔄 [updateTrackingList] Atualizando lista de tracking');
+      loadTrackingList();
+    } catch (error) {
+      console.error('❌ [updateTrackingList] Erro:', error);
+    }
+  }
+
+  // 🔐 Logout - limpar dados temporários
+  function handleLogout() {
+    try {
+      console.log('🔐 [handleLogout] Iniciando logout');
+      
+      // Confirmação
+      const confirmed = confirm(
+        `⚠️ Tem certeza que deseja sair?\n\n` +
+        `Você será desconectado e a sessão será encerrada.`
+      );
+      
+      if (!confirmed) {
+        console.log('⚠️ [handleLogout] Logout cancelado pelo usuário');
+        return;
+      }
+      
+      // Limpar dados
+      clearAllSessionData();
+      
+      // Fechar painel
+      closeExtensionUI();
+      
+      showInlineMessage('✅ Você foi desconectado. Até logo!', 'success');
+      
+      console.log('✅ [handleLogout] Logout concluído');
+    } catch (error) {
+      console.error('❌ [handleLogout] Erro:', error);
+      showInlineMessage('❌ Erro ao fazer logout', 'error');
+    }
+  }
+
+  // 🗑️ Limpar todos os dados temporários
+  function clearAllSessionData() {
+    try {
+      console.log('🗑️ [clearAllSessionData] Limpando dados da sessão');
+      
+      // Limpar uiState
+      uiState.currentUserId = null;
+      uiState.printPreference = { ...DEFAULT_PRINT_PREFERENCE };
+      uiState.fedexSettings = { ...DEFAULT_FEDEX_SETTINGS };
+      uiState.fedexSettingsMode = 'summary';
+      uiState.cancelableShipments = [];
+      uiState.selectedCancellationTracking = '';
+      uiState.selectedDrafts = [];
+      
+      if (uiState.backendStatus) {
+        uiState.backendStatus.lastSyncOk = false;
+        uiState.backendStatus.lastSyncMessage = 'Sessão encerrada';
+      }
+      
+      // Limpar localStorage
+      try {
+        localStorage.removeItem(PANEL_POSITION_STORAGE_KEY);
+        localStorage.removeItem(PANEL_UI_STATE_STORAGE_KEY);
+      } catch (e) {
+        console.warn('⚠️ [clearAllSessionData] Erro ao limpar localStorage:', e);
+      }
+      
+      // Limpar DOM
+      const panel = document.getElementById('fedexPsdPanel');
+      if (panel) {
+        panel.remove();
+      }
+      
+      console.log('✅ [clearAllSessionData] Dados da sessão limpos');
+    } catch (error) {
+      console.error('❌ [clearAllSessionData] Erro ao limpar:', error);
+    }
+  }
+
+  // ❌ Fechar interface da extensão
+  function closeExtensionUI() {
+    try {
+      console.log('❌ [closeExtensionUI] Fechando interface da extensão');
+      
+      // Remover painel principal
+      const panel = document.getElementById('fedexPsdPanel');
+      if (panel) {
+        panel.style.display = 'none';
+        setTimeout(() => {
+          try {
+            panel.remove();
+          } catch (e) {
+            console.warn('⚠️ [closeExtensionUI] Erro ao remover painel:', e);
+          }
+        }, 500);
+      }
+      
+      // Remover botão de toggle
+      const toggleBtn = document.getElementById('fedexToggleBtn');
+      if (toggleBtn) {
+        toggleBtn.remove();
+      }
+      
+      // Remover outros elementos
+      const elements = [
+        'fedexStatusIndicators',
+        'fedexDraftSelection',
+        'fedexTrackingSection',
+        'fedexPrintedLabels',
+        'fedexFormErrors'
+      ];
+      
+      elements.forEach(id => {
+        const el = document.getElementById(id);
+        if (el) el.remove();
+      });
+      
+      console.log('✅ [closeExtensionUI] Interface fechada');
+    } catch (error) {
+      console.error('❌ [closeExtensionUI] Erro:', error);
+    }
+  }
+
+  // ⚙️ Criar seção de utilidades/configurações
+  function createUtilitiesSection() {
+    try {
+      console.log('⚙️ [createUtilitiesSection] Criando seção de utilidades');
+      
+      const sectionDiv = document.createElement('div');
+      sectionDiv.id = 'fedexUtilities';
+      sectionDiv.style.cssText = `
+        padding: 12px !important;
+        background: #f9f9f9 !important;
+        border-radius: 6px !important;
+        margin: 12px 0 !important;
+        border-left: 4px solid #6c757d !important;
+      `;
+      
+      const title = document.createElement('h4');
+      title.textContent = '⚙️ Utilitários';
+      title.style.cssText = `
+        margin: 0 0 10px 0 !important;
+        font-size: 12px !important;
+        font-weight: bold !important;
+        color: #6c757d !important;
+      `;
+      sectionDiv.appendChild(title);
+      
+      const buttonsDiv = document.createElement('div');
+      buttonsDiv.style.cssText = 'display: flex !important; gap: 8px !important; flex-wrap: wrap !important;';
+      
+      // Botão: Refresh
+      const refreshBtn = document.createElement('button');
+      refreshBtn.textContent = '🔄 Atualizar';
+      refreshBtn.style.cssText = `
+        flex: 1 !important;
+        min-width: 100px !important;
+        padding: 8px !important;
+        font-size: 11px !important;
+        font-weight: bold !important;
+        background: #17a2b8 !important;
+        color: white !important;
+        border: none !important;
+        border-radius: 4px !important;
+        cursor: pointer !important;
+      `;
+      refreshBtn.addEventListener('click', () => {
+        console.log('🔄 Atualizando dados...');
+        syncUserState(uiState.currentUserId);
+        updateTrackingList();
+        showInlineMessage('✅ Dados atualizados', 'success');
+      });
+      refreshBtn.onmouseover = function() { this.style.background = '#138496 !important'; };
+      refreshBtn.onmouseout = function() { this.style.background = '#17a2b8 !important'; };
+      
+      // Botão: Limpar Cache
+      const clearCacheBtn = document.createElement('button');
+      clearCacheBtn.textContent = '🧹 Limpar Cache';
+      clearCacheBtn.style.cssText = `
+        flex: 1 !important;
+        min-width: 100px !important;
+        padding: 8px !important;
+        font-size: 11px !important;
+        font-weight: bold !important;
+        background: #ffc107 !important;
+        color: white !important;
+        border: none !important;
+        border-radius: 4px !important;
+        cursor: pointer !important;
+      `;
+      clearCacheBtn.addEventListener('click', () => {
+        try {
+          localStorage.clear();
+          sessionStorage.clear();
+          showInlineMessage('✅ Cache limpo com sucesso', 'success');
+          console.log('✅ Cache limpo');
+        } catch (e) {
+          showInlineMessage('⚠️ Erro ao limpar cache', 'warning');
+        }
+      });
+      clearCacheBtn.onmouseover = function() { this.style.background = '#e0a800 !important'; };
+      clearCacheBtn.onmouseout = function() { this.style.background = '#ffc107 !important'; };
+      
+      // Botão: Logout
+      const logoutBtn = document.createElement('button');
+      logoutBtn.textContent = '🔐 Logout';
+      logoutBtn.style.cssText = `
+        flex: 1 !important;
+        min-width: 100px !important;
+        padding: 8px !important;
+        font-size: 11px !important;
+        font-weight: bold !important;
+        background: #dc3545 !important;
+        color: white !important;
+        border: none !important;
+        border-radius: 4px !important;
+        cursor: pointer !important;
+      `;
+      logoutBtn.addEventListener('click', handleLogout);
+      logoutBtn.onmouseover = function() { this.style.background = '#c82333 !important'; };
+      logoutBtn.onmouseout = function() { this.style.background = '#dc3545 !important'; };
+      
+      buttonsDiv.appendChild(refreshBtn);
+      buttonsDiv.appendChild(clearCacheBtn);
+      buttonsDiv.appendChild(logoutBtn);
+      sectionDiv.appendChild(buttonsDiv);
+      
+      // Info box
+      const infoDiv = document.createElement('div');
+      infoDiv.style.cssText = `
+        margin-top: 10px !important;
+        padding: 8px !important;
+        background: #fff3cd !important;
+        border-radius: 4px !important;
+        border-left: 3px solid #ffc107 !important;
+        font-size: 10px !important;
+        color: #856404 !important;
+      `;
+      infoDiv.innerHTML = `
+        <strong>ℹ️ Versão:</strong> 1.0.0<br/>
+        <strong>Backend:</strong> ${BACKEND_BASE_URL.includes('localhost') ? '🏠 Localhost' : '☁️ Render'}<br/>
+        <strong>Status:</strong> ${uiState.backendStatus?.lastSyncMessage || 'Inicializando'}
+      `;
+      sectionDiv.appendChild(infoDiv);
+      
+      console.log('✅ [createUtilitiesSection] Seção criada');
+      
+      return sectionDiv;
+    } catch (error) {
+      console.error('❌ [createUtilitiesSection] Erro:', error);
+      return null;
     }
   }
 
@@ -1494,6 +2594,8 @@
         await selectFedexAccount(getCurrentUserId(), accountSelect.value);
         uiState.fedexSettingsMode = uiState.fedexSettings.accounts.length ? 'summary' : 'create';
         populateFedexSettingsForm();
+        updateStatusIndicators();
+        loadAccountPreferences(accountSelect.value);
       } catch (error) {
         console.error('Erro ao selecionar conta FedEx:', error);
         showInlineMessage(error.message, 'error');

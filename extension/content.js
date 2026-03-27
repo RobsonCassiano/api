@@ -183,6 +183,7 @@ window.addEventListener('message', (event) => {
   delete payload.requestId;
 
   console.log(`🌉 [content.js] Relayando mensagem do injected.js:`, messageType, 'requestId:', requestId);
+  console.log(`🌉 [content.js] Payload detalhado:`, payload);
 
   // Encaminhar para background.js usando Promise para evitar "Extension context invalidated"
   try {
