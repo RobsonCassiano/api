@@ -227,9 +227,7 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
   if (msg.type === 'GET_LOGIN_STATUS') {
     chrome.storage.local.get('fedex_login_status', (data) => {
       const status = data.fedex_login_status || { isLoggedIn: false };
-      console.log('Respondendo GET_LOGIN_STATUS:', status);
-      sendResponse(status);
-    })
+      
       // NOVO: Verificar expiração de sessão
       if (status.isLoggedIn && status.expiresAt && Date.now() > status.expiresAt) {
         console.log('⏰ Sessão expirou! Limpando dados...');
@@ -248,7 +246,9 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
   if (msg.type === 'USER_LOGOUT') {
     console.log('📴 Logout requisitado pelo usuário');
     clearAllSensitiveData();
-    sendResponse({ success: true
+    sendResponse({ success: true });
+    return true;
+  }
 
   if (msg.type === 'GET_FEDEX_SESSION') {
     getFedexSession().then((session) => {
