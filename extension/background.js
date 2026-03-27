@@ -1,13 +1,11 @@
-// background.js
-
 async function isFedexLoggedIn() {
   try {
     const cookies = await chrome.cookies.getAll({
       url: 'https://www.fedex.com/'
     });
 
-    // Verifica múltiplos cookies que indicam login
-    const hasLoginCookie = cookies.some(c =>
+    const hasLoginCookie = cookies.some((c) =>
+      c.name === 'fcl_uuid' ||
       c.name === 'fdx_login' ||
       c.name === 'pwg' ||
       c.name === 'FEDEX_EID'
@@ -21,17 +19,16 @@ async function isFedexLoggedIn() {
   }
 }
 
-// Valida se o usuário está realmente logado verificando dados específicos
 function validateUserLogin(loginData) {
   if (!loginData) {
-    console.log('❌ Dados de login não fornecidos');
+    console.log('Dados de login nao fornecidos');
     return false;
   }
 
   const hasUserLoggedIn = loginData.userLoggedIn === true;
   const hasUuId = loginData.uuId && loginData.uuId.length > 0;
 
-  console.log('🔍 Validando login:', {
+  console.log('Validando login:', {
     userLoggedIn: hasUserLoggedIn,
     uuId: hasUuId,
     uuIdValue: loginData.uuId
@@ -46,24 +43,30 @@ async function getFedexSession() {
       url: 'https://www.fedex.com/'
     });
 
-    const loginCookie = cookies.find(c => c.name === 'fdx_login');
+    const uuidCookie = cookies.find((c) => c.name === 'fcl_uuid');
+    const loginCookie = cookies.find((c) => c.name === 'fdx_login');
+
+    if (uuidCookie?.value) {
+      return {
+        userId: String(uuidCookie.value).trim(),
+        key: null,
+        value: null
+      };
+    }
 
     if (!loginCookie) {
-      console.log('Cookie fdx_login não encontrado');
+      console.log('Cookies fcl_uuid e fdx_login nao encontrados');
       return null;
     }
 
-    // Tentar fazer parse se for JSON
     let parsed;
     try {
       parsed = JSON.parse(loginCookie.value);
     } catch (parseErr) {
-      console.log('Cookie fdx_login não é JSON, tentando valor direto');
-      // Se não for JSON, usar o valor direto
+      console.log('Cookie fdx_login nao e JSON, tentando valor direto');
       parsed = loginCookie.value;
     }
 
-    // Retornar de forma segura
     if (typeof parsed === 'object' && parsed !== null) {
       return {
         userId: parsed.userId || null,
@@ -72,7 +75,6 @@ async function getFedexSession() {
       };
     }
 
-    // Se for string simples
     return {
       userId: parsed,
       key: null,
@@ -86,10 +88,10 @@ async function getFedexSession() {
 
 chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
   if (msg.type === 'CHECK_FEDEX_LOGIN') {
-    isFedexLoggedIn().then(loggedIn => {
+    isFedexLoggedIn().then((loggedIn) => {
       console.log('Respondendo CHECK_FEDEX_LOGIN:', loggedIn);
       sendResponse({ loggedIn });
-    }).catch(err => {
+    }).catch((err) => {
       console.error('Erro na resposta:', err);
       sendResponse({ loggedIn: false });
     });
@@ -97,24 +99,22 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
   }
 
   if (msg.type === 'VALIDATE_USER_LOGIN') {
-    // Recebe dados de login do content script
     const isValid = validateUserLogin(msg.data);
     console.log('Respondendo VALIDATE_USER_LOGIN:', isValid);
 
-    // Salvar o estado de login em storage
     if (isValid) {
       chrome.storage.local.set({
-        'fedex_login_status': {
+        fedex_login_status: {
           isLoggedIn: true,
           uuId: msg.data.uuId,
           timestamp: Date.now()
         }
       }, () => {
-        console.log('✅ Status de login salvo em storage');
+        console.log('Status de login salvo em storage');
       });
     } else {
       chrome.storage.local.set({
-        'fedex_login_status': {
+        fedex_login_status: {
           isLoggedIn: false,
           timestamp: Date.now()
         }
@@ -126,7 +126,6 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
   }
 
   if (msg.type === 'GET_LOGIN_STATUS') {
-    // Retorna o status de login salvo em storage
     chrome.storage.local.get('fedex_login_status', (data) => {
       const status = data.fedex_login_status || { isLoggedIn: false };
       console.log('Respondendo GET_LOGIN_STATUS:', status);
@@ -136,10 +135,10 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
   }
 
   if (msg.type === 'GET_FEDEX_SESSION') {
-    getFedexSession().then(session => {
+    getFedexSession().then((session) => {
       console.log('Respondendo GET_FEDEX_SESSION:', session);
       sendResponse({ session });
-    }).catch(err => {
+    }).catch((err) => {
       console.error('Erro na resposta:', err);
       sendResponse({ session: null });
     });
