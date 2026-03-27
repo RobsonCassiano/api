@@ -134,6 +134,53 @@ async function getFedexSession() {
   }
 }
 
+/**
+ * NOVO: Limpar dados sensíveis quando fazer logout
+ * Chamado quando: usuário faz logout, sessão expira, etc
+ */
+function clearAllSensitiveData() {
+  console.log('Limpando dados sensíveis da extensão...');
+  
+  // Limpar chrome.storage.local
+  chrome.storage.local.remove([
+    'fedex_login_status',
+    'userUuId',
+    'sessionToken'
+  ], () => {
+    console.log('Storage local limpo');
+  });
+
+  // Notificar todas as abas para limpar localStorage
+  chrome.tabs.query({}, (tabs) => {
+    tabs.forEach((tab) => {
+      chrome.tabs.sendMessage(tab.id, { 
+        type: 'CLEAR_SENSITIVE_DATA' 
+      }).catch(() => {
+        // Silenciosamente ignorar erros se aba não tiver content script
+      });
+    });
+  });
+}
+
+/**
+ * NOVO: Monitorar expiração de cookies de sessão FedEx
+ * Detecta quando o usuário faz logout
+ */
+if (chrome.cookies) {
+  chrome.cookies.onChanged.addListener((changeInfo) => {
+    const cookie = changeInfo.cookie;
+    
+    // Se cookie de sessão FedEx foi removido = logout
+    if ((cookie.name === 'sc_fcl_uuid' || 
+         cookie.name === 'fcl_uuid' || 
+         cookie.name === 'fdx_login') && 
+        changeInfo.removed) {
+      console.log('❌ Detectado logout do FedEx (cookie removido):', cookie.name);
+      clearAllSensitiveData();
+    }
+  });
+}
+
 chrome.runtime.onInstalled.addListener(() => {
   getStoredBackendBaseUrl().then((backendBaseUrl) => {
     chrome.storage.local.set({ backendBaseUrl });
@@ -157,22 +204,20 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
     console.log('Respondendo VALIDATE_USER_LOGIN:', isValid);
 
     if (isValid) {
+      // NOVO: Add session expiração (2 horas)
+      const SESSION_TIMEOUT = 2 * 60 * 60 * 1000;
       chrome.storage.local.set({
         fedex_login_status: {
           isLoggedIn: true,
           uuId: msg.data.uuId,
-          timestamp: Date.now()
+          timestamp: Date.now(),
+          expiresAt: Date.now() + SESSION_TIMEOUT  // ← NOVO
         }
       }, () => {
-        console.log('Status de login salvo em storage');
+        console.log('Status de login salvo (expira em 2h)');
       });
     } else {
-      chrome.storage.local.set({
-        fedex_login_status: {
-          isLoggedIn: false,
-          timestamp: Date.now()
-        }
-      });
+      clearAllSensitiveData();  // ← NOVO: limpar invalid login
     }
 
     sendResponse({ isValid });
@@ -184,9 +229,26 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
       const status = data.fedex_login_status || { isLoggedIn: false };
       console.log('Respondendo GET_LOGIN_STATUS:', status);
       sendResponse(status);
+    })
+      // NOVO: Verificar expiração de sessão
+      if (status.isLoggedIn && status.expiresAt && Date.now() > status.expiresAt) {
+        console.log('⏰ Sessão expirou! Limpando dados...');
+        clearAllSensitiveData();
+        sendResponse({ isLoggedIn: false });
+        return true;
+      }
+      
+      console.log('Respondendo GET_LOGIN_STATUS:', status);
+      sendResponse(status);
     });
     return true;
   }
+
+  // NOVO: Handler para requisição de logout
+  if (msg.type === 'USER_LOGOUT') {
+    console.log('📴 Logout requisitado pelo usuário');
+    clearAllSensitiveData();
+    sendResponse({ success: true
 
   if (msg.type === 'GET_FEDEX_SESSION') {
     getFedexSession().then((session) => {

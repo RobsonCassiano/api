@@ -282,6 +282,7 @@
   }
 
   function resetUiStateForLogout() {
+    console.log('🔄 Resetando estado da UI para logout...');
     uiState.currentUserId = null;
     uiState.printPreference = { ...DEFAULT_PRINT_PREFERENCE };
     uiState.fedexSettings = { ...DEFAULT_FEDEX_SETTINGS };
@@ -297,6 +298,7 @@
   }
 
   function hidePanelForLogout() {
+    console.log('❌ Ocultando painel para logout...');
     resetUiStateForLogout();
 
     const panel = document.getElementById('fedexPsdPanel');
@@ -315,6 +317,22 @@
       minimized: false
     });
   }
+
+  /**
+   * NOVO: Monitorar mensagem de logout do content script
+   * Limpa todos os dados quando o usuário faz logout
+   */
+  window.addEventListener('message', (event) => {
+    if (event.source !== window) {
+      return;
+    }
+
+    if (event.data?.type === 'FEDEX_SESSION_CLEARED') {
+      console.log('🚨 Sessão FedEx limpa pelo background script!');
+      hidePanelForLogout();
+      return true;
+    }
+  });
 
   function extractUrl(args) {
     const value = args[0];

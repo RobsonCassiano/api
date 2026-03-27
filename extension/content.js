@@ -4,6 +4,43 @@
 // ENDPOINT: /shipments?page=0&size=100&direction=DESC
 // ==========================================
 
+/**
+ * NOVO: Monitorar logout na página
+ * Detecta clique em botões de logout em qualquer página FedEx
+ */
+function monitorLogoutEvents() {
+  // Detectar clique em botões de logout genéricos
+  document.addEventListener('click', (event) => {
+    const target = event.target;
+    
+    // Procurar atributos/classes comuns de logout
+    const isLogoutButton = 
+      target.textContent?.toLowerCase().includes('logout') ||
+      target.textContent?.toLowerCase().includes('sair') ||
+      target.textContent?.toLowerCase().includes('sign out') ||
+      target.id?.toLowerCase().includes('logout') ||
+      target.className?.toLowerCase().includes('logout') ||
+      target.closest('[data-action="logout"]') ||
+      target.closest('button[aria-label*="Logout"]') ||
+      target.closest('button[aria-label*="Sign out"]');
+    
+    if (isLogoutButton) {
+      console.log('🚨 Logout detectado! Sinalizando ao background...');
+      chrome.runtime.sendMessage({ type: 'USER_LOGOUT' }).catch(() => {});
+    }
+  }, true);
+
+  // Detectar mudanças de URL (redirecionamento para login = logout)
+  let lastUrl = window.location.href;
+  window.addEventListener('popstate', () => {
+    if (window.location.href.includes('login') || window.location.href.includes('signin')) {
+      console.log('🔄 Redirecionado para login (logout detectado)');
+      chrome.runtime.sendMessage({ type: 'USER_LOGOUT' }).catch(() => {});
+    }
+    lastUrl = window.location.href;
+  });
+}
+
 function injectPageScript(backendBaseUrl) {
   const script = document.createElement('script');
   script.src = chrome.runtime.getURL('injected.js');
@@ -43,8 +80,37 @@ function injectPageScript(backendBaseUrl) {
   });
 }
 
+// NOVO: Listener para mensagens do background
+chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
+  if (msg.type === 'CLEAR_SENSITIVE_DATA') {
+    console.log('📭 Limpando dados sensíveis do localStorage...');
+    
+    // Limpar localStorage
+    try {
+      localStorage.removeItem('fedexPsdPanelPosition');
+      localStorage.removeItem('fedexPsdPanelUiState');
+      localStorage.removeItem('fedex_user_session');
+      localStorage.removeItem('fedex_uuid');
+      sessionStorage.clear();
+      console.log('✅ localStorage limpo');
+    } catch (e) {
+      console.warn('Não foi possível limpar localStorage:', e);
+    }
+    
+    // Notificar página injetada
+    window.postMessage({
+      type: 'FEDEX_SESSION_CLEARED'
+    }, '*');
+    
+    sendResponse({ success: true });
+    return true;
+  }
+});
+
 chrome.runtime.sendMessage({ type: 'GET_BACKEND_CONFIG' }, (response) => {
   injectPageScript(response?.backendBaseUrl || '');
+  // NOVO: Iniciar monitoramento de logout
+  monitorLogoutEvents();
 });
 
 window.addEventListener('message', (event) => {
