@@ -1,4 +1,4 @@
-(function() {
+(function () {
   console.log('%cFedEx Interceptor iniciando...', 'color: #ff6600; font-weight: bold;');
 
   const configuredScript = document.currentScript;
@@ -33,6 +33,35 @@
       lastSyncMessage: 'Aguardando sincronizacao'
     }
   };
+
+  // 🌉 Helper para comunicação com background.js via content.js
+  // Usa window.postMessage() sem chrome API (seguro para página injetada)
+  function sendMessageToBackground(message) {
+    return new Promise((resolve, reject) => {
+      const requestId = `${Date.now()}-${Math.random().toString(16).slice(2)}`;
+      const timeoutId = setTimeout(() => {
+        window.removeEventListener('message', handler);
+        reject(new Error(`Request timeout: ${message.type}`));
+      }, 10000);
+
+      function handler(event) {
+        if (event.source !== window) return;
+        if (event.data?.requestId !== requestId) return;
+
+        window.removeEventListener('message', handler);
+        clearTimeout(timeoutId);
+
+        if (event.data?.error) {
+          reject(new Error(event.data.error));
+        } else {
+          resolve(event.data);
+        }
+      }
+
+      window.addEventListener('message', handler);
+      window.postMessage({ ...message, requestId, _fromInjected: true }, '*');
+    });
+  }
 
   function clamp(value, min, max) {
     return Math.min(Math.max(value, min), max);
@@ -295,6 +324,7 @@
       lastSyncMessage: 'Sessao encerrada'
     };
     window.__READY_TO_FINALIZE__ = [];
+    console.log('✅ Estado limpo. currentUserId:', uiState.currentUserId);
   }
 
   function hidePanelForLogout() {
@@ -303,19 +333,22 @@
 
     const panel = document.getElementById('fedexPsdPanel');
     if (panel) {
+      console.log('🗑️ Removendo painel do DOM');
       panel.remove();
     }
 
     const reopenButton = document.getElementById('fedexPsdReopenButton');
     if (reopenButton) {
+      console.log('🚫 Ocultando botão de reabertura');
       reopenButton.style.display = 'none';
     }
 
     savePanelUiState({
       ...loadPanelUiState(),
-      closed: false,
+      closed: true,
       minimized: false
     });
+    console.log('✅ Painel ocultado. Sessão finalizada.');
   }
 
   /**
@@ -450,6 +483,10 @@
     );
   }
 
+  function getUserNameFromPageCookies() {
+    return getCookieValue('fcl_fname') || '';
+  }
+
   function getCurrentUserId() {
     return uiState.currentUserId || getUserIdFromPageCookies() || getDraftUserId(window.__READY_TO_FINALIZE__?.[0]) || null;
   }
@@ -458,13 +495,22 @@
     const normalizedUserId = String(userId || '').trim();
 
     if (!normalizedUserId) {
+      console.warn('⚠️ [syncUserState] userId está vazio');
       return null;
     }
+
+    console.log('👤 [syncUserState] Sincronizando usuário:', normalizedUserId);
 
     uiState.currentUserId = normalizedUserId;
     uiState.printPreference = await fetchPrintPreference(normalizedUserId);
     uiState.fedexSettings = await fetchFedexSettings(normalizedUserId);
     uiState.fedexSettingsMode = uiState.fedexSettings.accounts?.length ? 'summary' : 'create';
+
+    console.log('✅ [syncUserState] Usuário sincronizado:', {
+      userId: normalizedUserId,
+      accounts: uiState.fedexSettings.accounts?.length || 0,
+      mode: uiState.fedexSettingsMode
+    });
 
     const select = document.getElementById('fedexPrintMode');
     if (select) {
@@ -546,7 +592,9 @@
   }
 
   function hasActiveFedexSession() {
-    return Boolean(getUserIdFromPageCookies() || uiState.currentUserId);
+    // 🔐 CRÍTICO: Depender APENAS de uiState.currentUserId
+    // Os cookies persistem após logout no FedEx e causariam recriação do painel
+    return Boolean(uiState.currentUserId);
   }
 
   function verifySessionAndTogglePanel() {
@@ -585,17 +633,18 @@
       return { ...DEFAULT_PRINT_PREFERENCE };
     }
 
-    const response = await originalFetch(`${BACKEND_BASE_URL}/api/v1/users/${encodeURIComponent(userId)}/print-preferences`);
-    const data = await response.json().catch(() => null);
-
-    if (!response.ok) {
-      throw new Error(data?.error || `Falha ao carregar preferencia de impressao (HTTP ${response.status})`);
+    try {
+      const response = await sendMessageToBackground({
+        type: 'FETCH_PRINT_PREFERENCE',
+        userId
+      });
+      if (!response || !response.ok) {
+        throw new Error(response?.error || 'Falha ao carregar preferencia de impressao');
+      }
+      return { ...DEFAULT_PRINT_PREFERENCE, ...(response.data || {}) };
+    } catch (error) {
+      throw error;
     }
-
-    return {
-      ...DEFAULT_PRINT_PREFERENCE,
-      ...(data || {})
-    };
   }
 
   async function fetchFedexSettings(userId) {
@@ -603,30 +652,41 @@
       return { ...DEFAULT_FEDEX_SETTINGS };
     }
 
-    const response = await originalFetch(`${BACKEND_BASE_URL}/api/v1/users/${encodeURIComponent(userId)}/fedex-settings`);
-    const data = await response.json().catch(() => null);
+    try {
+      const response = await sendMessageToBackground({
+        type: 'FETCH_FEDEX_SETTINGS',
+        userId
+      });
+      if (!response || !response.ok) {
+        console.error('❌ Falha ao carregar fedex-settings:', response?.error);
+        uiState.backendStatus = {
+          source: BACKEND_BASE_URL,
+          lastSyncOk: false,
+          lastSyncMessage: `Falha ao carregar credenciais`
+        };
+        throw new Error(response?.error || 'Falha ao carregar configuracoes FedEx');
+      }
 
-    if (!response.ok) {
+      console.log('✅ Resposta recebida:', {
+        configured: response.data?.configured,
+        accountsCount: response.data?.accounts?.length,
+        selectedAccountNumber: response.data?.selectedAccountNumber
+      });
+
       uiState.backendStatus = {
         source: BACKEND_BASE_URL,
-        lastSyncOk: false,
-        lastSyncMessage: `Falha ao carregar credenciais (${response.status})`
+        lastSyncOk: true,
+        lastSyncMessage: response.data?.configured
+          ? `Credenciais carregadas: ${response.data.accounts?.length || 0} conta(s)`
+          : 'Nenhuma credencial encontrada no backend'
       };
-      throw new Error(data?.error || `Falha ao carregar configuracoes FedEx (HTTP ${response.status})`);
+
+      const result = { ...DEFAULT_FEDEX_SETTINGS, ...(response.data || {}) };
+      console.log('📦 [fetchFedexSettings] Retornando:', result);
+      return result;
+    } catch (error) {
+      throw error;
     }
-
-    uiState.backendStatus = {
-      source: BACKEND_BASE_URL,
-      lastSyncOk: true,
-      lastSyncMessage: data?.configured
-        ? `Credenciais carregadas: ${data.accounts?.length || 0} conta(s)`
-        : 'Nenhuma credencial encontrada no backend'
-    };
-
-    return {
-      ...DEFAULT_FEDEX_SETTINGS,
-      ...(data || {})
-    };
   }
 
   async function savePrintPreference(userId, preference) {
@@ -636,21 +696,20 @@
       return;
     }
 
-    const response = await originalFetch(`${BACKEND_BASE_URL}/api/v1/users/${encodeURIComponent(userId)}/print-preferences`, {
-      method: 'PUT',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(preference)
-    });
-    const data = await response.json().catch(() => null);
-
-    if (!response.ok) {
-      throw new Error(data?.error || `Falha ao salvar preferencia de impressao (HTTP ${response.status})`);
+    try {
+      const response = await sendMessageToBackground({
+        type: 'SAVE_PRINT_PREFERENCE',
+        userId,
+        preference
+      });
+      if (!response || !response.ok) {
+        throw new Error(response?.error || 'Falha ao salvar preferencia de impressao');
+      }
+      uiState.printPreference = { ...DEFAULT_PRINT_PREFERENCE, ...(response.data || {}) };
+      return response.data;
+    } catch (error) {
+      throw error;
     }
-
-    uiState.printPreference = {
-      ...DEFAULT_PRINT_PREFERENCE,
-      ...(data || {})
-    };
   }
 
   async function saveFedexSettings(userId, settings) {
@@ -660,21 +719,20 @@
       throw new Error('Usuario FedEx nao identificado na tela atual');
     }
 
-    const response = await originalFetch(`${BACKEND_BASE_URL}/api/v1/users/${encodeURIComponent(userId)}/fedex-settings`, {
-      method: 'PUT',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(settings)
-    });
-    const data = await response.json().catch(() => null);
-
-    if (!response.ok) {
-      throw new Error(data?.error || `Falha ao salvar configuracoes FedEx (HTTP ${response.status})`);
+    try {
+      const response = await sendMessageToBackground({
+        type: 'SAVE_FEDEX_SETTINGS',
+        userId,
+        settings
+      });
+      if (!response || !response.ok) {
+        throw new Error(response?.error || 'Falha ao salvar configuracoes FedEx');
+      }
+      uiState.fedexSettings = { ...DEFAULT_FEDEX_SETTINGS, ...(response.data || {}) };
+      return response.data;
+    } catch (error) {
+      throw error;
     }
-
-    uiState.fedexSettings = {
-      ...DEFAULT_FEDEX_SETTINGS,
-      ...(data || {})
-    };
   }
 
   async function selectFedexAccount(userId, accountNumber) {
@@ -684,21 +742,20 @@
       throw new Error('Usuario FedEx nao identificado na tela atual');
     }
 
-    const response = await originalFetch(`${BACKEND_BASE_URL}/api/v1/users/${encodeURIComponent(userId)}/fedex-settings/select`, {
-      method: 'PUT',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ accountNumber })
-    });
-    const data = await response.json().catch(() => null);
-
-    if (!response.ok) {
-      throw new Error(data?.error || `Falha ao selecionar conta FedEx (HTTP ${response.status})`);
+    try {
+      const response = await sendMessageToBackground({
+        type: 'SELECT_FEDEX_ACCOUNT',
+        userId,
+        accountNumber
+      });
+      if (!response || !response.ok) {
+        throw new Error(response?.error || 'Falha ao selecionar conta FedEx');
+      }
+          uiState.fedexSettings = { ...DEFAULT_FEDEX_SETTINGS, ...(response.data || {}) };
+          return response.data;
+    } catch (error) {
+      throw error;
     }
-
-    uiState.fedexSettings = {
-      ...DEFAULT_FEDEX_SETTINGS,
-      ...(data || {})
-    };
   }
 
   async function deleteFedexSettings(userId, accountNumber) {
@@ -708,19 +765,20 @@
       throw new Error('Usuario FedEx nao identificado na tela atual');
     }
 
-    const response = await originalFetch(`${BACKEND_BASE_URL}/api/v1/users/${encodeURIComponent(userId)}/fedex-settings/${encodeURIComponent(accountNumber)}`, {
-      method: 'DELETE'
-    });
-    const data = await response.json().catch(() => null);
-
-    if (!response.ok) {
-      throw new Error(data?.error || `Falha ao excluir conta FedEx (HTTP ${response.status})`);
+    try {
+      const response = await sendMessageToBackground({
+        type: 'DELETE_FEDEX_SETTINGS',
+        userId,
+        accountNumber
+      });
+      if (!response || !response.ok) {
+        throw new Error(response?.error || 'Falha ao excluir conta FedEx');
+      }
+      uiState.fedexSettings = { ...DEFAULT_FEDEX_SETTINGS, ...(response.data || {}) };
+      return response.data;
+    } catch (error) {
+      throw error;
     }
-
-    uiState.fedexSettings = {
-      ...DEFAULT_FEDEX_SETTINGS,
-      ...(data || {})
-    };
   }
 
   function readFedexSettingsForm() {
@@ -795,7 +853,14 @@
     }
 
     if (userHint) {
-      userHint.textContent = `Usuario atual: ${getCurrentUserId() || 'aguardando captura do draft'}`;
+      const userId = getCurrentUserId(); // continua disponível se precisar
+      const userName = getUserNameFromPageCookies();
+
+      const displayName = userName
+        ? userName.charAt(0).toUpperCase() + userName.slice(1).toLowerCase()
+        : 'Aguardando captura do draft';
+
+      userHint.textContent = `Usuario atual: ${displayName}`;
     }
 
     if (backendHint) {
@@ -946,14 +1011,14 @@
 
   async function refreshCancelableShipments() {
     try {
-      const response = await originalFetch(`${BACKEND_BASE_URL}/api/v1/drafts`);
-      const data = await response.json().catch(() => null);
-
-      if (!response.ok) {
-        throw new Error(data?.error || `Falha ao carregar drafts processados (HTTP ${response.status})`);
+      const response = await sendMessageToBackground({
+        type: 'FETCH_DRAFTS'
+      });
+      if (!response || !response.ok) {
+        throw new Error(response?.error || 'Falha ao carregar drafts processados');
       }
 
-      const drafts = Array.isArray(data?.drafts) ? data.drafts : [];
+      const drafts = Array.isArray(response.data?.drafts) ? response.data.drafts : [];
       const currentUserId = getCurrentUserId();
       const shipments = drafts
         .filter((draft) => {
@@ -1004,22 +1069,20 @@
       throw new Error('Selecione um tracking para cancelar');
     }
 
-    const response = await originalFetch(`${BACKEND_BASE_URL}/api/v1/fedex/shipments/cancel`, {
-      method: 'PUT',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
+    try {
+      const response = await sendMessageToBackground({
+        type: 'CANCEL_SHIPMENT',
         userId,
         accountNumber,
         trackingNumber
-      })
-    });
-    const data = await response.json().catch(() => null);
-
-    if (!response.ok) {
-      throw new Error(data?.error || `Falha ao cancelar shipment (HTTP ${response.status})`);
+      });
+      if (!response || !response.ok) {
+        throw new Error(response?.error || 'Falha ao cancelar shipment');
+      }
+      return response.data;
+    } catch (error) {
+      throw error;
     }
-
-    return data;
   }
 
   async function syncPrintPreferenceFromDrafts() {
@@ -1033,35 +1096,37 @@
   }
 
   async function saveDraftToBackend(draft) {
-    const response = await originalFetch(`${BACKEND_BASE_URL}/api/v1/drafts/save`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(draft)
-    });
-
-    const data = await response.json().catch(() => null);
-
-    if (!response.ok || !data?.draft?.id) {
-      throw new Error(data?.error || `Falha ao salvar draft (HTTP ${response.status})`);
+    try {
+      const response = await sendMessageToBackground({
+        type: 'SAVE_DRAFT',
+        draft
+      });
+      if (!response || !response.ok) {
+        throw new Error(response?.error || 'Falha ao salvar draft');
+      }
+      if (!response.data?.draft?.id) {
+        throw new Error('Backend nao retornou ID do draft');
+      }
+      return response.data.draft;
+    } catch (error) {
+      throw error;
     }
-
-    return data.draft;
   }
 
   async function sendDraftToFedex(localDraftId, options = {}) {
-    const response = await originalFetch(`${BACKEND_BASE_URL}/api/v1/drafts/${localDraftId}/send-to-fedex`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(options)
-    });
-
-    const data = await response.json().catch(() => null);
-
-    if (!response.ok) {
-      throw new Error(data?.error || data?.details || `Falha ao enviar draft para FedEx (HTTP ${response.status})`);
+    try {
+      const response = await sendMessageToBackground({
+        type: 'SEND_DRAFT_TO_FEDEX',
+        draftId: localDraftId,
+        options
+      });
+      if (!response || !response.ok) {
+        throw new Error(response?.error || 'Falha ao enviar draft para FedEx');
+      }
+      return response.data;
+    } catch (error) {
+      throw error;
     }
-
-    return data;
   }
 
   function openDocumentUrl(url) {
@@ -1119,14 +1184,18 @@
   }
 
   async function fetchEncodedDraftDocuments(draftId) {
-    const response = await originalFetch(`${BACKEND_BASE_URL}/api/v1/drafts/${encodeURIComponent(draftId)}/documents/encoded`);
-    const data = await response.json().catch(() => null);
-
-    if (!response.ok) {
-      throw new Error(data?.error || `Falha ao carregar documentos codificados (HTTP ${response.status})`);
+    try {
+      const response = await sendMessageToBackground({
+        type: 'FETCH_ENCODED_DOCUMENTS',
+        draftId
+      });
+      if (!response || !response.ok) {
+        throw new Error(response?.error || 'Falha ao carregar documentos codificados');
+      }
+      return response.data;
+    } catch (error) {
+      throw error;
     }
-
-    return data;
   }
 
   function handleShipmentPrinting(result, printPreference) {
@@ -1217,7 +1286,7 @@
     await syncPrintPreferenceFromDrafts();
   }
 
-  window.fetch = async function(...args) {
+  window.fetch = async function (...args) {
     const response = await originalFetch.apply(this, args);
 
     try {
@@ -1233,7 +1302,7 @@
     return response;
   };
 
-  window.showReadyToFinalize = function() {
+  window.showReadyToFinalize = function () {
     if (window.__READY_TO_FINALIZE__?.length) {
       console.log('%cREADY_TO_FINALIZE:', 'background: #28a745; color: white;', window.__READY_TO_FINALIZE__);
       return;

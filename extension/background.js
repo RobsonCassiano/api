@@ -139,27 +139,35 @@ async function getFedexSession() {
  * Chamado quando: usuário faz logout, sessão expira, etc
  */
 function clearAllSensitiveData() {
-  console.log('Limpando dados sensíveis da extensão...');
+  console.log('🧹 INICIANDO LIMPEZA COMPLETA DE DADOS SENSÍVEIS...');
   
   // Limpar chrome.storage.local
   chrome.storage.local.remove([
     'fedex_login_status',
     'userUuId',
-    'sessionToken'
+    'sessionToken',
+    'fedex_uuid',
+    'fedex_user_session',
+    'backendBaseUrl'
   ], () => {
-    console.log('Storage local limpo');
+    console.log('✅ chrome.storage.local limpo');
   });
 
-  // Notificar todas as abas para limpar localStorage
+  // Notificar TODAS as abas para limpar localStorage/sessionStorage
   chrome.tabs.query({}, (tabs) => {
-    tabs.forEach((tab) => {
+    console.log(`📢 Enviando CLEAR_SENSITIVE_DATA para ${tabs.length} abas`);
+    tabs.forEach((tab, index) => {
       chrome.tabs.sendMessage(tab.id, { 
         type: 'CLEAR_SENSITIVE_DATA' 
-      }).catch(() => {
-        // Silenciosamente ignorar erros se aba não tiver content script
+      }).then(() => {
+        console.log(`✅ Aba ${index + 1}/${tabs.length} limpa (ID: ${tab.id})`);
+      }).catch((err) => {
+        console.warn(`⚠️ Erro ao limpar aba ${index + 1} (ID: ${tab.id}):`, err.message);
       });
     });
   });
+  
+  console.log('✅ LIMPEZA INICIADA');
 }
 
 /**
@@ -186,6 +194,35 @@ chrome.runtime.onInstalled.addListener(() => {
     chrome.storage.local.set({ backendBaseUrl });
   });
 });
+
+// 🔌 Função genérica para fazer fetch no backend
+async function backendFetch(method, endpoint, body = null) {
+  const backendUrl = await getStoredBackendBaseUrl();
+  const url = `${backendUrl}${endpoint}`;
+  
+  const options = {
+    method,
+    headers: { 'Content-Type': 'application/json' },
+    targetAddressSpace: 'private'
+  };
+  
+  if (body && (method === 'PUT' || method === 'POST')) {
+    options.body = JSON.stringify(body);
+  }
+  
+  console.log(`📤 [backendFetch] ${method} ${url}`);
+  
+  const response = await fetch(url, options);
+  const data = await response.json().catch(() => null);
+  
+  if (!response.ok) {
+    console.error(`❌ [backendFetch] ${response.status}`, data);
+    throw new Error(data?.error || `HTTP ${response.status}`);
+  }
+  
+  console.log(`✅ [backendFetch] ${method} ${url}`);
+  return data;
+}
 
 chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
   if (msg.type === 'CHECK_FEDEX_LOGIN') {
@@ -278,6 +315,89 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
       console.error('Erro ao salvar configuracao do backend:', err);
       sendResponse({ ok: false, error: err.message });
     });
+    return true;
+  }
+
+  // 🌐 HANDLERS PARA REQUISIÇÕES DO BACKEND
+  
+  if (msg.type === 'FETCH_PRINT_PREFERENCE') {
+    backendFetch('GET', `/api/v1/users/${encodeURIComponent(msg.userId)}/print-preferences`)
+      .then((data) => sendResponse({ ok: true, data }))
+      .catch((err) => sendResponse({ ok: false, error: err.message }));
+    return true;
+  }
+
+  if (msg.type === 'FETCH_FEDEX_SETTINGS') {
+    backendFetch('GET', `/api/v1/users/${encodeURIComponent(msg.userId)}/fedex-settings`)
+      .then((data) => sendResponse({ ok: true, data }))
+      .catch((err) => sendResponse({ ok: false, error: err.message }));
+    return true;
+  }
+
+  if (msg.type === 'SAVE_PRINT_PREFERENCE') {
+    backendFetch('PUT', `/api/v1/users/${encodeURIComponent(msg.userId)}/print-preferences`, msg.preference)
+      .then((data) => sendResponse({ ok: true, data }))
+      .catch((err) => sendResponse({ ok: false, error: err.message }));
+    return true;
+  }
+
+  if (msg.type === 'SAVE_FEDEX_SETTINGS') {
+    backendFetch('PUT', `/api/v1/users/${encodeURIComponent(msg.userId)}/fedex-settings`, msg.settings)
+      .then((data) => sendResponse({ ok: true, data }))
+      .catch((err) => sendResponse({ ok: false, error: err.message }));
+    return true;
+  }
+
+  if (msg.type === 'SELECT_FEDEX_ACCOUNT') {
+    backendFetch('PUT', `/api/v1/users/${encodeURIComponent(msg.userId)}/fedex-settings/select`, { accountNumber: msg.accountNumber })
+      .then((data) => sendResponse({ ok: true, data }))
+      .catch((err) => sendResponse({ ok: false, error: err.message }));
+    return true;
+  }
+
+  if (msg.type === 'DELETE_FEDEX_SETTINGS') {
+    backendFetch('DELETE', `/api/v1/users/${encodeURIComponent(msg.userId)}/fedex-settings/${encodeURIComponent(msg.accountNumber)}`)
+      .then((data) => sendResponse({ ok: true, data }))
+      .catch((err) => sendResponse({ ok: false, error: err.message }));
+    return true;
+  }
+
+  if (msg.type === 'FETCH_DRAFTS') {
+    backendFetch('GET', '/api/v1/drafts')
+      .then((data) => sendResponse({ ok: true, data }))
+      .catch((err) => sendResponse({ ok: false, error: err.message }));
+    return true;
+  }
+
+  if (msg.type === 'CANCEL_SHIPMENT') {
+    backendFetch('PUT', '/api/v1/fedex/shipments/cancel', {
+      userId: msg.userId,
+      accountNumber: msg.accountNumber,
+      trackingNumber: msg.trackingNumber
+    })
+      .then((data) => sendResponse({ ok: true, data }))
+      .catch((err) => sendResponse({ ok: false, error: err.message }));
+    return true;
+  }
+
+  if (msg.type === 'SAVE_DRAFT') {
+    backendFetch('POST', '/api/v1/drafts/save', msg.draft)
+      .then((data) => sendResponse({ ok: true, data }))
+      .catch((err) => sendResponse({ ok: false, error: err.message }));
+    return true;
+  }
+
+  if (msg.type === 'SEND_DRAFT_TO_FEDEX') {
+    backendFetch('POST', `/api/v1/drafts/${encodeURIComponent(msg.draftId)}/send-to-fedex`, msg.options || {})
+      .then((data) => sendResponse({ ok: true, data }))
+      .catch((err) => sendResponse({ ok: false, error: err.message }));
+    return true;
+  }
+
+  if (msg.type === 'FETCH_ENCODED_DOCUMENTS') {
+    backendFetch('GET', `/api/v1/drafts/${encodeURIComponent(msg.draftId)}/documents/encoded`)
+      .then((data) => sendResponse({ ok: true, data }))
+      .catch((err) => sendResponse({ ok: false, error: err.message }));
     return true;
   }
 });

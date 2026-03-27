@@ -15,11 +15,11 @@ function monitorLogoutEvents() {
     
     // Procurar atributos/classes comuns de logout
     const isLogoutButton = 
-      target.textContent?.toLowerCase().includes('logout') ||
-      target.textContent?.toLowerCase().includes('sair') ||
-      target.textContent?.toLowerCase().includes('sign out') ||
-      target.id?.toLowerCase().includes('logout') ||
-      target.className?.toLowerCase().includes('logout') ||
+      String(target.textContent || '').toLowerCase().includes('logout') ||
+      String(target.textContent || '').toLowerCase().includes('sair') ||
+      String(target.textContent || '').toLowerCase().includes('sign out') ||
+      String(target.id || '').toLowerCase().includes('logout') ||
+      String(target.className || '').toLowerCase().includes('logout') ||
       target.closest('[data-action="logout"]') ||
       target.closest('button[aria-label*="Logout"]') ||
       target.closest('button[aria-label*="Sign out"]');
@@ -30,15 +30,26 @@ function monitorLogoutEvents() {
     }
   }, true);
 
-  // Detectar mudanças de URL (redirecionamento para login = logout)
+  // Detectar mudanças de URL com monitor periódico
   let lastUrl = window.location.href;
-  window.addEventListener('popstate', () => {
-    if (window.location.href.includes('login') || window.location.href.includes('signin')) {
-      console.log('🔄 Redirecionado para login (logout detectado)');
-      chrome.runtime.sendMessage({ type: 'USER_LOGOUT' }).catch(() => {});
+  let logoutTriggered = false;
+  
+  const checkUrlForLogout = () => {
+    const currentUrl = window.location.href;
+    if (currentUrl !== lastUrl) {
+      lastUrl = currentUrl;
+      if ((currentUrl.includes('login') || currentUrl.includes('signin') || currentUrl.includes('/home')) && !logoutTriggered) {
+        console.log('🔄 Redirecionado para login/home (logout detectado)');
+        logoutTriggered = true;
+        chrome.runtime.sendMessage({ type: 'USER_LOGOUT' }).catch(() => {});
+        setTimeout(() => { logoutTriggered = false; }, 2000);
+      }
     }
-    lastUrl = window.location.href;
-  });
+  };
+  
+  window.addEventListener('popstate', checkUrlForLogout);
+  window.addEventListener('hashchange', checkUrlForLogout);
+  setInterval(checkUrlForLogout, 1000);
 }
 
 function injectPageScript(backendBaseUrl) {
@@ -128,6 +139,59 @@ window.addEventListener('message', (event) => {
       requestId: event.data.requestId || null,
       session: response?.session || null
     }, '*');
+  });
+});
+
+// NOVO: Bridge para mensagens da injected.js (window.postMessage -> chrome.runtime.sendMessage)
+window.addEventListener('message', (event) => {
+  // Verificar origem
+  if (event.source !== window) {
+    return;
+  }
+
+  // Verificar se é mensagem da injected.js
+  if (!event.data?._fromInjected) {
+    return;
+  }
+
+  // Lista de tipos permitidos que content.js encaminha para background.js
+  const ALLOWED_MESSAGE_TYPES = [
+    'FETCH_PRINT_PREFERENCE',
+    'FETCH_FEDEX_SETTINGS',
+    'SAVE_PRINT_PREFERENCE',
+    'SAVE_FEDEX_SETTINGS',
+    'SELECT_FEDEX_ACCOUNT',
+    'DELETE_FEDEX_SETTINGS',
+    'FETCH_DRAFTS',
+    'CANCEL_SHIPMENT',
+    'SAVE_DRAFT',
+    'SEND_DRAFT_TO_FEDEX',
+    'FETCH_ENCODED_DOCUMENTS'
+  ];
+
+  const messageType = event.data?.type;
+  const requestId = event.data?.requestId;
+
+  if (!ALLOWED_MESSAGE_TYPES.includes(messageType)) {
+    console.warn(`⚠️ Tipo de mensagem nao permitido: ${messageType}`);
+    return;
+  }
+
+  // Construir payload para background.js (sem campos internos)
+  const payload = { ...event.data };
+  delete payload._fromInjected;
+  delete payload.requestId;
+
+  // Encaminhar para background.js
+  chrome.runtime.sendMessage(payload, (response) => {
+    // Retornar resposta para injected.js com o mesmo requestId
+    window.postMessage(
+      {
+        ...response,
+        requestId
+      },
+      '*'
+    );
   });
 });
 

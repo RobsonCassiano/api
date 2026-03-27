@@ -17,9 +17,25 @@ const PORT = process.env.PORT || 3000;
 // ========== MIDDLEWARES ==========
 app.use(express.json());
 
+// 🔓 CORS Configuration
 app.use(cors({
-  origin: process.env.ALLOWED_ORIGIN || '*'
+  origin: process.env.ALLOWED_ORIGIN || '*',
+  methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
+  allowedHeaders: ['Content-Type', 'Authorization'],
+  credentials: false
 }));
+
+// ✅ Add Private Network Access header (required for Chrome extension private network requests)
+app.use((req, res, next) => {
+  res.header('Access-Control-Allow-Private-Network', 'true');
+  next();
+});
+
+// ✅ Handle OPTIONS preflight requests (with all headers)
+app.options('*', (req, res) => {
+  res.header('Access-Control-Allow-Private-Network', 'true');
+  res.sendStatus(204);
+});
 
 // Log de requisições
 app.use((req, res, next) => {
