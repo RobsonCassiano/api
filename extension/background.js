@@ -4,6 +4,29 @@ const FEDEX_COOKIE_URLS = [
   'https://www.fedex.com/',
   'https://magicplus-magicplus.apps.az.fxei.fedex.com/'
 ];
+const DEFAULT_BACKEND_BASE_URL = 'https://fedex-shipping-api.onrender.com';
+
+function normalizeBackendBaseUrl(value) {
+  return String(value || '').trim().replace(/\/+$/, '');
+}
+
+function getStoredBackendBaseUrl() {
+  return new Promise((resolve) => {
+    chrome.storage.local.get('backendBaseUrl', (data) => {
+      const nextValue = normalizeBackendBaseUrl(data?.backendBaseUrl);
+      resolve(nextValue || DEFAULT_BACKEND_BASE_URL);
+    });
+  });
+}
+
+function setStoredBackendBaseUrl(value) {
+  return new Promise((resolve) => {
+    const normalizedValue = normalizeBackendBaseUrl(value) || DEFAULT_BACKEND_BASE_URL;
+    chrome.storage.local.set({ backendBaseUrl: normalizedValue }, () => {
+      resolve(normalizedValue);
+    });
+  });
+}
 
 async function getFedexCookies() {
   const cookieMap = new Map();
@@ -111,6 +134,12 @@ async function getFedexSession() {
   }
 }
 
+chrome.runtime.onInstalled.addListener(() => {
+  getStoredBackendBaseUrl().then((backendBaseUrl) => {
+    chrome.storage.local.set({ backendBaseUrl });
+  });
+});
+
 chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
   if (msg.type === 'CHECK_FEDEX_LOGIN') {
     isFedexLoggedIn().then((loggedIn) => {
@@ -166,6 +195,26 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
     }).catch((err) => {
       console.error('Erro na resposta:', err);
       sendResponse({ session: null });
+    });
+    return true;
+  }
+
+  if (msg.type === 'GET_BACKEND_CONFIG') {
+    getStoredBackendBaseUrl().then((backendBaseUrl) => {
+      sendResponse({ backendBaseUrl });
+    }).catch((err) => {
+      console.error('Erro ao obter configuracao do backend:', err);
+      sendResponse({ backendBaseUrl: DEFAULT_BACKEND_BASE_URL });
+    });
+    return true;
+  }
+
+  if (msg.type === 'SET_BACKEND_CONFIG') {
+    setStoredBackendBaseUrl(msg.backendBaseUrl).then((backendBaseUrl) => {
+      sendResponse({ ok: true, backendBaseUrl });
+    }).catch((err) => {
+      console.error('Erro ao salvar configuracao do backend:', err);
+      sendResponse({ ok: false, error: err.message });
     });
     return true;
   }

@@ -1,0 +1,149 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>FedEx PSDU - Configuracoes</title>
+  <style>
+    :root {
+      --bg: #f5f8f2;
+      --panel: #ffffff;
+      --text: #17301f;
+      --muted: #5c6f61;
+      --border: #cfe0d0;
+      --accent: #2f6f3e;
+      --accent-strong: #245a31;
+      --danger: #b42318;
+    }
+
+    * {
+      box-sizing: border-box;
+    }
+
+    body {
+      margin: 0;
+      padding: 24px;
+      background: linear-gradient(180deg, #eef6ec 0%, var(--bg) 100%);
+      color: var(--text);
+      font-family: "Segoe UI", Tahoma, sans-serif;
+    }
+
+    .panel {
+      max-width: 720px;
+      background: var(--panel);
+      border: 1px solid var(--border);
+      border-radius: 16px;
+      padding: 24px;
+      box-shadow: 0 16px 40px rgba(23, 48, 31, 0.08);
+    }
+
+    h1 {
+      margin: 0 0 8px;
+      font-size: 24px;
+    }
+
+    p {
+      margin: 0 0 16px;
+      line-height: 1.5;
+      color: var(--muted);
+    }
+
+    label {
+      display: block;
+      margin-bottom: 8px;
+      font-weight: 600;
+    }
+
+    input {
+      width: 100%;
+      padding: 12px 14px;
+      border: 1px solid var(--border);
+      border-radius: 10px;
+      font-size: 14px;
+      color: var(--text);
+    }
+
+    .actions {
+      display: flex;
+      gap: 12px;
+      margin-top: 16px;
+      flex-wrap: wrap;
+    }
+
+    button {
+      border: 0;
+      border-radius: 10px;
+      padding: 11px 16px;
+      cursor: pointer;
+      font-weight: 600;
+      font-size: 14px;
+    }
+
+    #saveButton {
+      background: var(--accent);
+      color: #fff;
+    }
+
+    #saveButton:hover {
+      background: var(--accent-strong);
+    }
+
+    #resetButton {
+      background: #edf3ee;
+      color: var(--text);
+      border: 1px solid var(--border);
+    }
+
+    #status {
+      margin-top: 16px;
+      min-height: 20px;
+      font-size: 13px;
+      font-weight: 600;
+    }
+
+    .success {
+      color: var(--accent);
+    }
+
+    .error {
+      color: var(--danger);
+    }
+
+    .hint {
+      margin-top: 20px;
+      padding-top: 16px;
+      border-top: 1px solid var(--border);
+      font-size: 13px;
+    }
+  </style>
+</head>
+<body>
+  <main class="panel">
+    <h1>FedEx PSDU Integrator</h1>
+    <p>Defina o backend que a extensao vai usar para salvar credenciais, preferencias e drafts.</p>
+
+    <label for="backendBaseUrl">Backend Base URL</label>
+    <input
+      id="backendBaseUrl"
+      type="url"
+      inputmode="url"
+      placeholder="https://fedex-shipping-api.onrender.com"
+      autocomplete="off"
+    />
+
+    <div class="actions">
+      <button id="saveButton" type="button">Salvar</button>
+      <button id="resetButton" type="button">Restaurar padrao</button>
+    </div>
+
+    <div id="status" aria-live="polite"></div>
+
+    <p class="hint">
+      Valor padrao: <strong>https://fedex-shipping-api.onrender.com</strong>.
+      Apos salvar, recarregue a pagina da FedEx para aplicar a nova configuracao.
+    </p>
+  </main>
+
+  <script src="options.js"></script>
+</body>
+</html>
