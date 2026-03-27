@@ -277,6 +277,41 @@
     reopenButton.style.display = visible ? 'block' : 'none';
   }
 
+  function resetUiStateForLogout() {
+    uiState.currentUserId = null;
+    uiState.printPreference = { ...DEFAULT_PRINT_PREFERENCE };
+    uiState.fedexSettings = { ...DEFAULT_FEDEX_SETTINGS };
+    uiState.fedexSettingsMode = 'summary';
+    uiState.cancelableShipments = [];
+    uiState.selectedCancellationTracking = '';
+    uiState.backendStatus = {
+      source: BACKEND_BASE_URL,
+      lastSyncOk: false,
+      lastSyncMessage: 'Sessao encerrada'
+    };
+    window.__READY_TO_FINALIZE__ = [];
+  }
+
+  function hidePanelForLogout() {
+    resetUiStateForLogout();
+
+    const panel = document.getElementById('fedexPsdPanel');
+    if (panel) {
+      panel.remove();
+    }
+
+    const reopenButton = document.getElementById('fedexPsdReopenButton');
+    if (reopenButton) {
+      reopenButton.style.display = 'none';
+    }
+
+    savePanelUiState({
+      ...loadPanelUiState(),
+      closed: false,
+      minimized: false
+    });
+  }
+
   function extractUrl(args) {
     const value = args[0];
 
@@ -486,6 +521,24 @@
     }
 
     return nextUserId;
+  }
+
+  function hasActiveFedexSession() {
+    return Boolean(getUserIdFromPageCookies() || uiState.currentUserId);
+  }
+
+  function verifySessionAndTogglePanel() {
+    if (!hasActiveFedexSession()) {
+      hidePanelForLogout();
+      return false;
+    }
+
+    setReopenButtonVisible(loadPanelUiState().closed);
+    if (!document.getElementById('fedexPsdPanel') && document.body) {
+      createButton();
+    }
+
+    return true;
   }
 
   function getSelectedFedexAccount() {
@@ -1172,6 +1225,11 @@
       return false;
     }
 
+    if (!hasActiveFedexSession()) {
+      setReopenButtonVisible(false);
+      return false;
+    }
+
     const savedUiState = loadPanelUiState();
     if (savedUiState.closed) {
       setReopenButtonVisible(true);
@@ -1746,10 +1804,23 @@
   setTimeout(createButton, 1000);
   setTimeout(createButton, 2000);
 
-  setInterval(() => {
-    setReopenButtonVisible(loadPanelUiState().closed);
-    if (!document.getElementById('fedexPsdPanel') && document.body) {
-      createButton();
+  const scheduleSessionCheck = () => {
+    window.setTimeout(() => {
+      verifySessionAndTogglePanel();
+    }, 100);
+  };
+
+  window.addEventListener('focus', scheduleSessionCheck);
+  window.addEventListener('pageshow', scheduleSessionCheck);
+  window.addEventListener('popstate', scheduleSessionCheck);
+  window.addEventListener('hashchange', scheduleSessionCheck);
+  document.addEventListener('visibilitychange', () => {
+    if (document.visibilityState === 'visible') {
+      scheduleSessionCheck();
     }
+  });
+
+  setInterval(() => {
+    verifySessionAndTogglePanel();
   }, 3000);
 })();
