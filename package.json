@@ -6,7 +6,8 @@
   "scripts": {
     "start": "node src/server/server.js",
     "dev": "nodemon src/server/server.js",
-    "extension:watch": "echo 'Extension ready. Load ./extension in Chrome extensions page'"
+    "extension:watch": "echo 'Extension ready. Load ./extension in Chrome extensions page'",
+    "sync:render-preferences": "node scripts/sync-render-preferences.js"
   },
   "keywords": [
     "shopify",

@@ -99,5 +99,32 @@ module.exports = {
             userId: normalizedUserId,
             ...nextPreference
         };
+    },
+
+    importRecords(records = {}) {
+        const nextRecords = records && typeof records === 'object' ? records : {};
+        const preferences = loadPreferences();
+        let importedUsers = 0;
+
+        Object.entries(nextRecords).forEach(([userId, record]) => {
+            const normalizedUserId = normalizeUserId(userId);
+
+            if (!normalizedUserId) {
+                return;
+            }
+
+            preferences[normalizedUserId] = normalizePrintPreference(record);
+            importedUsers += 1;
+        });
+
+        savePreferences(preferences);
+
+        logger.info('Preferencias de impressao importadas', {
+            importedUsers
+        });
+
+        return {
+            importedUsers
+        };
     }
 };

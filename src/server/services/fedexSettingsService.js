@@ -310,5 +310,46 @@ module.exports = {
             ...selectedAccount,
             configured: true
         };
+    },
+
+    importRecords(records = {}) {
+        const nextRecords = records && typeof records === 'object' ? records : {};
+        const settings = loadSettings();
+        let importedUsers = 0;
+        let importedAccounts = 0;
+
+        Object.entries(nextRecords).forEach(([userId, record]) => {
+            const normalizedUserId = normalizeUserId(userId);
+
+            if (!normalizedUserId) {
+                return;
+            }
+
+            const normalizedRecord = normalizeUserRecord(record);
+            if (!normalizedRecord.accounts.length) {
+                return;
+            }
+
+            settings[normalizedUserId] = {
+                selectedAccountNumber: normalizedRecord.selectedAccountNumber,
+                accounts: normalizedRecord.accounts.map((item) => serializeSettingsForStorage(item))
+            };
+
+            importedUsers += 1;
+            importedAccounts += normalizedRecord.accounts.length;
+        });
+
+        saveSettings(settings);
+
+        logger.info('Configuracoes FedEx importadas', {
+            importedUsers,
+            importedAccounts,
+            encrypted: hasEncryptionConfigured()
+        });
+
+        return {
+            importedUsers,
+            importedAccounts
+        };
     }
 };

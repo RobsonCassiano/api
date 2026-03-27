@@ -6,6 +6,7 @@ const shopifyController = require('../controllers/shopifyController');
 const draftController = require('../controllers/draftController');
 const printPreferenceController = require('../controllers/printPreferenceController');
 const fedexSettingsController = require('../controllers/fedexSettingsController');
+const adminController = require('../controllers/adminController');
 
 const router = express.Router();
 
@@ -49,5 +50,8 @@ router.delete('/api/v1/users/:userId/fedex-settings/:accountNumber', fedexSettin
 router.post('/api/v1/orders/process', orderController.processOrder);
 router.get('/api/v1/orders', orderController.getProcessedOrders);
 router.get('/api/v1/orders/:id', orderController.getProcessedOrderById);
+
+// ========== ADMIN ==========
+router.post('/api/v1/admin/import/preferences', adminController.importPreferences);
 
 module.exports = router;
