@@ -248,16 +248,29 @@ async function backendFetch(method, endpoint, body = null) {
   }
 }
 
+// 🛡️ Wrapper para sendResponse seguro (trata "Extension context invalidated")
+function safeResponse(sendResponse, response) {
+  try {
+    sendResponse(response);
+  } catch (error) {
+    if (error.message?.includes('Extension context invalidated')) {
+      console.warn(`⚠️ [background.js] Extension context invalidated - não foi possível enviar resposta`);
+    } else {
+      console.error(`❌ [background.js] Erro ao enviar resposta:`, error);
+    }
+  }
+}
+
 chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
   console.log(`📨 [background.js] Mensagem recebida:`, msg.type, msg);
 
   if (msg.type === 'CHECK_FEDEX_LOGIN') {
     isFedexLoggedIn().then((loggedIn) => {
       console.log('Respondendo CHECK_FEDEX_LOGIN:', loggedIn);
-      sendResponse({ loggedIn });
+      safeResponse(sendResponse, { loggedIn });
     }).catch((err) => {
       console.error('Erro na resposta:', err);
-      sendResponse({ loggedIn: false });
+      safeResponse(sendResponse, { loggedIn: false });
     });
     return true;
   }
@@ -283,7 +296,7 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
       clearAllSensitiveData();  // ← NOVO: limpar invalid login
     }
 
-    sendResponse({ isValid });
+    safeResponse(sendResponse, { isValid });
     return true;
   }
 
@@ -295,12 +308,12 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
       if (status.isLoggedIn && status.expiresAt && Date.now() > status.expiresAt) {
         console.log('⏰ Sessão expirou! Limpando dados...');
         clearAllSensitiveData();
-        sendResponse({ isLoggedIn: false });
+        safeResponse(sendResponse, { isLoggedIn: false });
         return true;
       }
       
       console.log('Respondendo GET_LOGIN_STATUS:', status);
-      sendResponse(status);
+      safeResponse(sendResponse, status);
     });
     return true;
   }
@@ -309,37 +322,37 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
   if (msg.type === 'USER_LOGOUT') {
     console.log('📴 Logout requisitado pelo usuário');
     clearAllSensitiveData();
-    sendResponse({ success: true });
+    safeResponse(sendResponse, { success: true });
     return true;
   }
 
   if (msg.type === 'GET_FEDEX_SESSION') {
     getFedexSession().then((session) => {
       console.log('Respondendo GET_FEDEX_SESSION:', session);
-      sendResponse({ session });
+      safeResponse(sendResponse, { session });
     }).catch((err) => {
       console.error('Erro na resposta:', err);
-      sendResponse({ session: null });
+      safeResponse(sendResponse, { session: null });
     });
     return true;
   }
 
   if (msg.type === 'GET_BACKEND_CONFIG') {
     getStoredBackendBaseUrl().then((backendBaseUrl) => {
-      sendResponse({ backendBaseUrl });
+      safeResponse(sendResponse, { backendBaseUrl });
     }).catch((err) => {
       console.error('Erro ao obter configuracao do backend:', err);
-      sendResponse({ backendBaseUrl: DEFAULT_BACKEND_BASE_URL });
+      safeResponse(sendResponse, { backendBaseUrl: DEFAULT_BACKEND_BASE_URL });
     });
     return true;
   }
 
   if (msg.type === 'SET_BACKEND_CONFIG') {
     setStoredBackendBaseUrl(msg.backendBaseUrl).then((backendBaseUrl) => {
-      sendResponse({ ok: true, backendBaseUrl });
+      safeResponse(sendResponse, { ok: true, backendBaseUrl });
     }).catch((err) => {
       console.error('Erro ao salvar configuracao do backend:', err);
-      sendResponse({ ok: false, error: err.message });
+      safeResponse(sendResponse, { ok: false, error: err.message });
     });
     return true;
   }
@@ -351,19 +364,19 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
     backendFetch('GET', `/api/v1/users/${encodeURIComponent(msg.userId)}/print-preferences`)
       .then((data) => {
         console.log(`✅ [background.js] FETCH_PRINT_PREFERENCE sucesso, respondendo`);
-        sendResponse({ ok: true, data });
+        safeResponse(sendResponse, { ok: true, data });
       })
       .catch((err) => {
         console.error(`❌ [background.js] FETCH_PRINT_PREFERENCE erro:`, err.message);
-        sendResponse({ ok: false, error: err.message });
+        safeResponse(sendResponse, { ok: false, error: err.message });
       });
     return true;
   }
 
   if (msg.type === 'FETCH_FEDEX_SETTINGS') {
     backendFetch('GET', `/api/v1/users/${encodeURIComponent(msg.userId)}/fedex-settings`)
-      .then((data) => sendResponse({ ok: true, data }))
-      .catch((err) => sendResponse({ ok: false, error: err.message }));
+      .then((data) => safeResponse(sendResponse, { ok: true, data }))
+      .catch((err) => safeResponse(sendResponse, { ok: false, error: err.message }));
     return true;
   }
 
@@ -372,13 +385,13 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
       try {
         const userId = msg.userId || await getCurrentUserId();
         if (!userId) {
-          sendResponse({ ok: false, error: 'Usuario nao identificado' });
+          safeResponse(sendResponse, { ok: false, error: 'Usuario nao identificado' });
           return;
         }
         const data = await backendFetch('PUT', `/api/v1/users/${encodeURIComponent(userId)}/print-preferences`, msg.preference);
-        sendResponse({ ok: true, data });
+        safeResponse(sendResponse, { ok: true, data });
       } catch (err) {
-        sendResponse({ ok: false, error: err.message });
+        safeResponse(sendResponse, { ok: false, error: err.message });
       }
     })();
     return true;
@@ -389,13 +402,13 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
       try {
         const userId = msg.userId || await getCurrentUserId();
         if (!userId) {
-          sendResponse({ ok: false, error: 'Usuario nao identificado' });
+          safeResponse(sendResponse, { ok: false, error: 'Usuario nao identificado' });
           return;
         }
         const data = await backendFetch('PUT', `/api/v1/users/${encodeURIComponent(userId)}/fedex-settings`, msg.settings);
-        sendResponse({ ok: true, data });
+        safeResponse(sendResponse, { ok: true, data });
       } catch (err) {
-        sendResponse({ ok: false, error: err.message });
+        safeResponse(sendResponse, { ok: false, error: err.message });
       }
     })();
     return true;
@@ -406,13 +419,13 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
       try {
         const userId = msg.userId || await getCurrentUserId();
         if (!userId) {
-          sendResponse({ ok: false, error: 'Usuario nao identificado' });
+          safeResponse(sendResponse, { ok: false, error: 'Usuario nao identificado' });
           return;
         }
         const data = await backendFetch('PUT', `/api/v1/users/${encodeURIComponent(userId)}/fedex-settings/select`, { accountNumber: msg.accountNumber });
-        sendResponse({ ok: true, data });
+        safeResponse(sendResponse, { ok: true, data });
       } catch (err) {
-        sendResponse({ ok: false, error: err.message });
+        safeResponse(sendResponse, { ok: false, error: err.message });
       }
     })();
     return true;
@@ -420,8 +433,8 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
 
   if (msg.type === 'DELETE_FEDEX_SETTINGS') {
     backendFetch('DELETE', `/api/v1/users/${encodeURIComponent(msg.userId)}/fedex-settings/${encodeURIComponent(msg.accountNumber)}`)
-      .then((data) => sendResponse({ ok: true, data }))
-      .catch((err) => sendResponse({ ok: false, error: err.message }));
+      .then((data) => safeResponse(sendResponse, { ok: true, data }))
+      .catch((err) => safeResponse(sendResponse, { ok: false, error: err.message }));
     return true;
   }
 
@@ -430,11 +443,11 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
     backendFetch('GET', '/api/v1/drafts')
       .then((data) => {
         console.log(`✅ [background.js] FETCH_DRAFTS sucesso, respondendo`);
-        sendResponse({ ok: true, data });
+        safeResponse(sendResponse, { ok: true, data });
       })
       .catch((err) => {
         console.error(`❌ [background.js] FETCH_DRAFTS erro:`, err.message);
-        sendResponse({ ok: false, error: err.message });
+        safeResponse(sendResponse, { ok: false, error: err.message });
       });
     return true;
   }
@@ -444,7 +457,7 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
       try {
         const userId = msg.userId || await getCurrentUserId();
         if (!userId) {
-          sendResponse({ ok: false, error: 'Usuario nao identificado' });
+          safeResponse(sendResponse, { ok: false, error: 'Usuario nao identificado' });
           return;
         }
         const data = await backendFetch('PUT', '/api/v1/fedex/shipments/cancel', {
@@ -452,9 +465,9 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
           accountNumber: msg.accountNumber,
           trackingNumber: msg.trackingNumber
         });
-        sendResponse({ ok: true, data });
+        safeResponse(sendResponse, { ok: true, data });
       } catch (err) {
-        sendResponse({ ok: false, error: err.message });
+        safeResponse(sendResponse, { ok: false, error: err.message });
       }
     })();
     return true;
@@ -462,22 +475,22 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
 
   if (msg.type === 'SAVE_DRAFT') {
     backendFetch('POST', '/api/v1/drafts/save', msg.draft)
-      .then((data) => sendResponse({ ok: true, data }))
-      .catch((err) => sendResponse({ ok: false, error: err.message }));
+      .then((data) => safeResponse(sendResponse, { ok: true, data }))
+      .catch((err) => safeResponse(sendResponse, { ok: false, error: err.message }));
     return true;
   }
 
   if (msg.type === 'SEND_DRAFT_TO_FEDEX') {
     backendFetch('POST', `/api/v1/drafts/${encodeURIComponent(msg.draftId)}/send-to-fedex`, msg.options || {})
-      .then((data) => sendResponse({ ok: true, data }))
-      .catch((err) => sendResponse({ ok: false, error: err.message }));
+      .then((data) => safeResponse(sendResponse, { ok: true, data }))
+      .catch((err) => safeResponse(sendResponse, { ok: false, error: err.message }));
     return true;
   }
 
   if (msg.type === 'FETCH_ENCODED_DOCUMENTS') {
     backendFetch('GET', `/api/v1/drafts/${encodeURIComponent(msg.draftId)}/documents/encoded`)
-      .then((data) => sendResponse({ ok: true, data }))
-      .catch((err) => sendResponse({ ok: false, error: err.message }));
+      .then((data) => safeResponse(sendResponse, { ok: true, data }))
+      .catch((err) => safeResponse(sendResponse, { ok: false, error: err.message }));
     return true;
   }
 });

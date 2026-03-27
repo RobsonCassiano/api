@@ -184,18 +184,37 @@ window.addEventListener('message', (event) => {
 
   console.log(`🌉 [content.js] Relayando mensagem do injected.js:`, messageType, 'requestId:', requestId);
 
-  // Encaminhar para background.js
-  chrome.runtime.sendMessage(payload, (response) => {
-    console.log(`🌉 [content.js] Resposta recebida de background.js:`, messageType, response);
-    // Retornar resposta para injected.js com o mesmo requestId
-    window.postMessage(
-      {
-        ...response,
-        requestId
-      },
-      '*'
-    );
-  });
+  // Encaminhar para background.js usando Promise para evitar "Extension context invalidated"
+  try {
+    chrome.runtime.sendMessage(payload, (response) => {
+      try {
+        // Verificar se o contexto ainda é válido antes de responder
+        if (!window || !window.postMessage) {
+          console.warn(`⚠️ [content.js] Contexto da janela não disponível para responder`);
+          return;
+        }
+
+        console.log(`🌉 [content.js] Resposta recebida de background.js:`, messageType, response);
+        
+        // Retornar resposta para injected.js com o mesmo requestId
+        window.postMessage(
+          {
+            ...response,
+            requestId
+          },
+          '*'
+        );
+      } catch (error) {
+        if (error.message?.includes('Extension context invalidated')) {
+          console.warn(`⚠️ [content.js] Extension context invalidated - não foi possível enviar resposta`);
+        } else {
+          console.error(`❌ [content.js] Erro ao responder para injected.js:`, error);
+        }
+      }
+    });
+  } catch (error) {
+    console.error(`❌ [content.js] Erro ao enviar mensagem para background.js:`, error);
+  }
 });
 
 console.log('%cContent Script Carregado', 'background: #ff6600; color: white; padding: 3px 8px;');

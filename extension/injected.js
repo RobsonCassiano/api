@@ -40,29 +40,59 @@
     return new Promise((resolve, reject) => {
       const requestId = `${Date.now()}-${Math.random().toString(16).slice(2)}`;
       console.log(`📤 [injected.js] Enviando mensagem:`, message.type, 'requestId:', requestId);
-      const timeoutId = setTimeout(() => {
-        window.removeEventListener('message', handler);
+      
+      let timeoutId;
+      let handler;
+      let isResolved = false;
+
+      timeoutId = setTimeout(() => {
+        if (isResolved) return;
+        isResolved = true;
+        
+        try {
+          window.removeEventListener('message', handler);
+        } catch (e) {
+          console.warn('Erro ao remover listener:', e);
+        }
+        
         reject(new Error(`Request timeout: ${message.type}`));
       }, 10000);
 
-      function handler(event) {
-        if (event.source !== window) return;
-        if (event.data?.requestId !== requestId) return;
+      handler = (event) => {
+        try {
+          if (event.source !== window) return;
+          if (event.data?.requestId !== requestId) return;
 
-        window.removeEventListener('message', handler);
-        clearTimeout(timeoutId);
+          if (isResolved) return;
+          isResolved = true;
 
-        console.log(`📥 [injected.js] Resposta recebida:`, message.type, event.data);
+          window.removeEventListener('message', handler);
+          clearTimeout(timeoutId);
 
-        if (event.data?.error) {
-          reject(new Error(event.data.error));
-        } else {
-          resolve(event.data);
+          console.log(`📥 [injected.js] Resposta recebida:`, message.type, event.data);
+
+          if (event.data?.error) {
+            reject(new Error(event.data.error));
+          } else {
+            resolve(event.data);
+          }
+        } catch (error) {
+          console.error(`❌ [injected.js] Erro ao processar resposta:`, error);
+          if (!isResolved) {
+            isResolved = true;
+            reject(error);
+          }
         }
-      }
+      };
 
-      window.addEventListener('message', handler);
-      window.postMessage({ ...message, requestId, _fromInjected: true }, '*');
+      try {
+        window.addEventListener('message', handler);
+        window.postMessage({ ...message, requestId, _fromInjected: true }, '*');
+      } catch (error) {
+        console.error(`❌ [injected.js] Erro ao enviar mensagem:`, error);
+        isResolved = true;
+        reject(error);
+      }
     });
   }
 
