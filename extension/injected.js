@@ -368,6 +368,66 @@
     return uiState.currentUserId || getDraftUserId(window.__READY_TO_FINALIZE__?.[0]) || null;
   }
 
+  function requestFedexSessionFromExtension() {
+    return new Promise((resolve) => {
+      const requestId = `fedex-psdu-${Date.now()}-${Math.random().toString(16).slice(2)}`;
+
+      const timeoutId = window.setTimeout(() => {
+        window.removeEventListener('message', onMessage);
+        resolve(null);
+      }, 3000);
+
+      const onMessage = (event) => {
+        if (event.source !== window) {
+          return;
+        }
+
+        if (event.data?.type !== 'FEDEX_PSDU_SESSION_RESPONSE' || event.data?.requestId !== requestId) {
+          return;
+        }
+
+        window.clearTimeout(timeoutId);
+        window.removeEventListener('message', onMessage);
+        resolve(event.data?.session || null);
+      };
+
+      window.addEventListener('message', onMessage);
+      window.postMessage({
+        type: 'FEDEX_PSDU_GET_SESSION',
+        requestId
+      }, '*');
+    });
+  }
+
+  async function ensureCurrentUserId() {
+    const existingUserId = getCurrentUserId();
+
+    if (existingUserId) {
+      return existingUserId;
+    }
+
+    const session = await requestFedexSessionFromExtension();
+    const nextUserId = String(session?.userId || '').trim();
+
+    if (!nextUserId) {
+      return null;
+    }
+
+    uiState.currentUserId = nextUserId;
+
+    try {
+      uiState.printPreference = await fetchPrintPreference(nextUserId);
+      uiState.fedexSettings = await fetchFedexSettings(nextUserId);
+      uiState.fedexSettingsMode = uiState.fedexSettings.accounts?.length ? 'summary' : 'create';
+      populateFedexSettingsForm();
+      await refreshCancelableShipments();
+    } catch (error) {
+      console.error('Erro ao sincronizar sessao FedEx:', error);
+    }
+
+    return nextUserId;
+  }
+
   function getSelectedFedexAccount() {
     return uiState.fedexSettings.selectedAccount || null;
   }
@@ -422,6 +482,8 @@
   }
 
   async function savePrintPreference(userId, preference) {
+    userId = userId || await ensureCurrentUserId();
+
     if (!userId) {
       return;
     }
@@ -444,6 +506,8 @@
   }
 
   async function saveFedexSettings(userId, settings) {
+    userId = userId || await ensureCurrentUserId();
+
     if (!userId) {
       throw new Error('Usuario FedEx nao identificado na tela atual');
     }
@@ -466,6 +530,8 @@
   }
 
   async function selectFedexAccount(userId, accountNumber) {
+    userId = userId || await ensureCurrentUserId();
+
     if (!userId) {
       throw new Error('Usuario FedEx nao identificado na tela atual');
     }
@@ -488,6 +554,8 @@
   }
 
   async function deleteFedexSettings(userId, accountNumber) {
+    userId = userId || await ensureCurrentUserId();
+
     if (!userId) {
       throw new Error('Usuario FedEx nao identificado na tela atual');
     }
@@ -768,7 +836,7 @@
   }
 
   async function cancelShipment(trackingNumber, accountNumber) {
-    const userId = getCurrentUserId();
+    const userId = await ensureCurrentUserId();
 
     if (!userId) {
       throw new Error('Usuario FedEx nao identificado na tela atual');
@@ -1477,6 +1545,7 @@
     document.body.appendChild(container);
     populateFedexSettingsForm();
     refreshCancelableShipments();
+    ensureCurrentUserId();
     setReopenButtonVisible(false);
     applyPanelPosition(container, loadSavedPanelPosition());
     enablePanelDragging(container, titleBar);
