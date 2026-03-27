@@ -6,6 +6,11 @@ const routes = require('./routes');
 const errorHandler = require('./middlewares/errorHandler');
 const logger = require('./utils/logger');
 
+if (process.env.NODE_TLS_REJECT_UNAUTHORIZED === '0') {
+  delete process.env.NODE_TLS_REJECT_UNAUTHORIZED;
+  console.warn('NODE_TLS_REJECT_UNAUTHORIZED=0 foi removido para manter a verificacao TLS ativa.');
+}
+
 const app = express();
 const PORT = process.env.PORT || 3000;
 

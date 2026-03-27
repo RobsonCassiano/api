@@ -1,8 +1,14 @@
 require('dotenv').config();
 const fs = require('fs');
+const https = require('https');
 const path = require('path');
 const axios = require('axios');
 const { setTimeout: sleep } = require('timers/promises');
+
+if (process.env.NODE_TLS_REJECT_UNAUTHORIZED === '0') {
+    delete process.env.NODE_TLS_REJECT_UNAUTHORIZED;
+    console.warn('NODE_TLS_REJECT_UNAUTHORIZED=0 foi removido para manter a verificacao TLS ativa.');
+}
 
 function readJsonFile(filePath) {
     if (!fs.existsSync(filePath)) {
@@ -20,19 +26,20 @@ async function main() {
     const printPreferencesPath = path.join(preferencesDir, 'print-preferences.json');
     const requestTimeoutMs = Number(process.env.RENDER_SYNC_TIMEOUT_MS || 60000);
     const maxAttempts = Number(process.env.RENDER_SYNC_MAX_ATTEMPTS || 3);
+    const allowInsecureTls = String(process.env.RENDER_SYNC_INSECURE_TLS || '').trim() === '1';
 
     if (!importToken) {
         throw new Error('Defina ADMIN_IMPORT_TOKEN no ambiente local antes de sincronizar');
+    }
+
+    if (allowInsecureTls) {
+        console.warn('RENDER_SYNC_INSECURE_TLS=1 ativo apenas para este script. Corrija o certificado local assim que possivel.');
     }
 
     const payload = {
         fedexSettings: readJsonFile(fedexSettingsPath),
         printPreferences: readJsonFile(printPreferencesPath)
     };
-
-    if (process.env.NODE_TLS_REJECT_UNAUTHORIZED === '0') {
-        console.warn('Aviso: NODE_TLS_REJECT_UNAUTHORIZED=0 desabilita a verificacao TLS e nao e recomendado.');
-    }
 
     let lastError = null;
 
@@ -42,6 +49,9 @@ async function main() {
 
             const response = await axios.post(`${backendUrl}/api/v1/admin/import/preferences`, payload, {
                 timeout: requestTimeoutMs,
+                httpsAgent: allowInsecureTls
+                    ? new https.Agent({ rejectUnauthorized: false })
+                    : undefined,
                 headers: {
                     'Content-Type': 'application/json',
                     Authorization: `Bearer ${importToken}`
